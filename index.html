@@ -18,7 +18,6 @@
       }
     };
   </script>
-  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
   <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   <style>
     :root { --bg:#f6f7fb; --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --accent:#111827; --ring:#e5e7eb; }
@@ -273,6 +272,7 @@ Requirements:
       const txt = document.createElement("div");
       txt.innerHTML =
         `<div class="node-title-row"><span style="font-weight:600">${node.title}</span>
+           <button class="readbtn" data-prereq="${node.id}">Prerequisites</button>
            <button class="readbtn" ${READING.has(node.id) ? "disabled": ""} data-read="${node.id}">${READING.has(node.id) ? "Reading…" : "Read"}</button>
            <button class="readbtn" ${FETCHING_VIDEOS.has(node.id) ? "disabled": ""} data-videos="${node.id}">${FETCHING_VIDEOS.has(node.id) ? "Fetching…" : "Suggest videos"}</button>
          </div>` +
@@ -282,6 +282,12 @@ Requirements:
       head.appendChild(chev);
       head.appendChild(txt);
       wrap.appendChild(head);
+
+      // PREREQUISITES button (independent of expand/collapse)
+      txt.querySelector('button[data-prereq]').addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        showPrerequisites(node, wrap);
+      });
 
       // READ button (independent of expand/collapse)
       txt.querySelector('button[data-read]').addEventListener('click', async (ev) => {
@@ -294,6 +300,157 @@ Requirements:
         ev.stopPropagation();
         await suggestVideos(node, path.concat({ id: node.id, title: node.title }));
       });
+// Show prerequisites for a section under the correct node
+async function showPrerequisites(node, nodeWrap) {
+  // Remove any existing prerequisites box inside this node only
+  nodeWrap.querySelectorAll('.prereqbox').forEach(e => e.remove());
+  const prereqDiv = document.createElement('div');
+  prereqDiv.className = 'prereqbox';
+  prereqDiv.style.marginTop = '8px';
+  prereqDiv.innerHTML = `<b>Prerequisites:</b><br><span class="muted">Loading…</span>`;
+  // Insert after node-head
+  const head = nodeWrap.querySelector('.node-head');
+  if (head && head.nextSibling) {
+    nodeWrap.insertBefore(prereqDiv, head.nextSibling);
+  } else {
+    nodeWrap.appendChild(prereqDiv);
+  }
+
+  // Fetch prerequisites from OpenAI if in Live mode
+  if (LIVE) {
+    const topic = $("inpTopic").value.trim();
+    const audience = $("inpAudience").value.trim() || "general";
+    const model = $("selModel").value;
+    const temperature = parseFloat($("inpTemp").value || "0.3");
+    const key = $("inpKey").value.trim();
+    if (!key) {
+      prereqDiv.innerHTML = `<b>Prerequisites:</b><br><span class='danger'>Please add your OpenAI API key or switch to Mock mode.</span>`;
+      return;
+    }
+    const prereqPrompt = `List the prerequisites (knowledge, skills, or concepts) needed to understand the following section in a topic outline. Return a concise bullet list.\n\nGlobal Topic: ${topic}\nAudience: ${audience}\nBreadcrumb (root->current): ${(nodeWrap.querySelector('.id')?.textContent || node.id)}\nCurrent Section Title: ${node.title}\nCurrent Section ID: ${node.id}\n\nInstructions:\n- Return only a bullet list of prerequisites.\n- No explanations, no JSON, no code blocks.`;
+    try {
+      const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model,
+          temperature,
+          messages: [
+            { role: "system", content: "You are an expert curriculum designer. You list prerequisites for learning a section." },
+            { role: "user", content: prereqPrompt }
+          ],
+        }),
+      });
+      if (!resp.ok) throw new Error(`OpenAI error ${resp.status}: ${await resp.text()}`);
+      const data = await resp.json();
+      const text = (data.choices?.[0]?.message?.content || "").trim();
+      // Create a Prerequisites node as the first child if not present
+      if (!node.children) node.children = [];
+      let prereqNode = node.children.find(c => c.id === 'prerequisites');
+      if (!prereqNode) {
+        prereqNode = {
+          id: 'prerequisites',
+          title: 'Prerequisites',
+          description: `Prerequisites for ${node.title}`,
+          children: []
+        };
+        node.children.unshift(prereqNode);
+      }
+      // Only add the prerequisites list if not already present
+      if (!prereqNode._prereqList) {
+        // Sanitize and parse prerequisites list
+        let cleanText = text.replace(/[*_`#>\[\]\(\)]/g, ''); // Remove markdown/special chars
+        cleanText = cleanText.replace(/\r/g, '');
+        const lines = cleanText.split(/\n|<br\s*\/?>/).filter(l => l.trim().startsWith("•") || l.trim().startsWith("-") || l.trim().length > 0);
+        const ul = document.createElement('ul');
+        ul.style.margin = '8px 0 0 0';
+        ul.style.paddingLeft = '18px';
+        ul.style.listStyle = 'disc';
+        lines.forEach(line => {
+          let itemText = line.replace(/^[-•\s]+/, '').trim();
+          // Remove any lingering special chars
+          itemText = itemText.replace(/[*_`#>\[\]\(\)]/g, '');
+          if (!itemText) return;
+          const li = document.createElement('li');
+          li.textContent = itemText;
+          li.style.cursor = 'pointer';
+          li.style.color = '#2563eb';
+          li.style.textDecoration = 'underline';
+          li.addEventListener('click', async (ev) => {
+            ev.stopPropagation();
+            li.textContent = itemText + ' (Loading...)';
+            // Fetch sub-tree for prerequisite
+            const topic = $("inpTopic").value.trim();
+            const audience = $("inpAudience").value.trim() || "general";
+            const model = $("selModel").value;
+            const temperature = parseFloat($("inpTemp").value || "0.3");
+            const key = $("inpKey").value.trim();
+            const prereqPrompt = `Expand the following prerequisite as a sub-section in a topic outline.\n\nGlobal Topic: ${topic}\nAudience: ${audience}\nParent Section: ${node.title}\nPrerequisite: ${itemText}\n\nReturn ONLY valid JSON:\n{ "children": TocNode[] }\nTocNode = { id: string (slug), title: string, description?: string, children?: TocNode[] }\n- Provide 2–5 high-quality sub-sections.\n- IDs must be unique and URL-safe; prefix with the prerequisite name.\n- Keep titles concise; add short descriptions only when valuable.`;
+            try {
+              const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${key}`,
+                },
+                body: JSON.stringify({
+                  model,
+                  temperature,
+                  response_format: { type: "json_object" },
+                  messages: [
+                    { role: "system", content: "You are an expert curriculum designer. You expand prerequisites into sub-sections." },
+                    { role: "user", content: prereqPrompt }
+                  ],
+                }),
+              });
+              if (!resp.ok) throw new Error(`OpenAI error ${resp.status}: ${await resp.text()}`);
+              const data = await resp.json();
+              const text = data.choices?.[0]?.message?.content?.trim() || '{"children":[]}';
+              const parsed = JSON.parse(text);
+              // Add sub-tree to the prerequisites node only
+              if (!prereqNode.children) prereqNode.children = [];
+              const seen = new Set(prereqNode.children.map(c => c.id));
+              const ensure = (nodes, prefix="") => (nodes||[]).map(n => {
+                let id = (n.id && String(n.id)) || slug((prefix?prefix+"/":"") + n.title);
+                if (seen.has(id)) id = id + "-" + Math.random().toString(36).slice(2,6);
+                n.id = id; seen.add(id);
+                if (n.children) n.children = ensure(n.children, n.id);
+                return n;
+              });
+              const kids = ensure(parsed.children || [], slug(itemText));
+              prereqNode.children.push({
+                id: slug(itemText),
+                title: itemText,
+                description: `Expanded prerequisite for ${node.title}`,
+                children: kids
+              });
+              renderTree(CURRENT_TOC, $("tree"));
+            } catch (e) {
+              li.textContent = itemText + ' (Error: ' + (e.message || String(e)) + ')';
+            }
+          });
+          ul.appendChild(li);
+        });
+        prereqNode._prereqList = true;
+        prereqDiv.innerHTML = `<b>Prerequisites:</b>`;
+        prereqDiv.appendChild(ul);
+      } else {
+        // If already present, just show the list
+        prereqDiv.innerHTML = `<b>Prerequisites:</b> (see tree)`;
+      }
+      if (window.MathJax && window.MathJax.typesetPromise) {
+        window.MathJax.typesetPromise([prereqDiv]).catch(() => {});
+      }
+    } catch (e) {
+      prereqDiv.innerHTML = `<b>Prerequisites:</b><br><span class='danger'>${e.message || String(e)}</span>`;
+    }
+  } else {
+    prereqDiv.innerHTML = `<b>Prerequisites:</b><br><span class='muted'>No prerequisites listed for this section (Mock mode).</span>`;
+  }
+}
 
       // Click to toggle expand (and keep state)
       head.addEventListener("click", async () => {
@@ -836,8 +993,20 @@ Style:
 
         if (!resp.ok) throw new Error(`OpenAI error ${resp.status}: ${await resp.text()}`);
         const data = await resp.json();
-        const text = (data.choices?.[0]?.message?.content || "").trim();
-        CONTENT.set(node.id, text || "No content returned.");
+  let text = (data.choices?.[0]?.message?.content || "").trim();
+  // Remove markdown headings, blockquotes, horizontal rules, and code blocks
+  text = text.replace(/(^|\n)[#]+[ ]?(.*)/g, '$1$2'); // headings
+  text = text.replace(/(^|\n)[>]+[ ]?(.*)/g, '$1$2'); // blockquotes
+  text = text.replace(/(^|\n)[*-]{3,}/g, '\n'); // horizontal rules
+  text = text.replace(/```[\s\S]*?```/g, ''); // code blocks
+  text = text.replace(/\r/g, '');
+  // Remove links but keep text
+  text = text.replace(/\[(.*?)\]\((.*?)\)/g, '$1');
+  // Remove stray asterisks, underscores, and backticks not part of math
+  text = text.replace(/(?<!\\)[*_`]+/g, '');
+  // Remove leading bullets (but keep LaTeX $ and $$)
+  text = text.replace(/(^|\n)[\-•]+[ ]?/g, '$1');
+  CONTENT.set(node.id, text || "No content returned.");
       } catch (e) {
         $("errorBox").textContent = e.message || String(e);
       } finally {
