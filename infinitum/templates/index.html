@@ -319,6 +319,52 @@
       return marked.parse(markdownText);
     }
 
+    // Robust MathJax typesetting helper: if MathJax isn't loaded yet, queue elements
+    // and flush when the MathJax script finishes loading. Use typesetMath(el)
+    // with a single Element or an array of Elements. Call with no args to
+    // typeset the entire document when ready.
+    function typesetMath(el) {
+      try {
+        // Normalize elements into an array or null
+        const els = (typeof el === 'undefined' || el === null)
+          ? null
+          : (Array.isArray(el) ? el : [el]);
+
+        if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
+          if (els) return window.MathJax.typesetPromise(els).catch((err) => console.log('MathJax typeset error:', err));
+          return window.MathJax.typesetPromise().catch((err) => console.log('MathJax typeset error:', err));
+        }
+
+        // Queue the request for later. Use a global queue array on window.
+        window._mj_queue = window._mj_queue || [];
+        window._mj_queue.push(els);
+        return Promise.resolve();
+      } catch (err) {
+        console.log('typesetMath failed:', err);
+        return Promise.resolve();
+      }
+    }
+
+    // When MathJax script finishes loading, flush any queued typeset requests.
+    (function flushMathJaxQueueOnLoad() {
+      const script = document.getElementById('MathJax-script');
+      if (!script) return;
+      script.addEventListener('load', () => {
+        if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
+          const q = window._mj_queue || [];
+          for (const els of q) {
+            try {
+              if (els) window.MathJax.typesetPromise(els).catch((e) => console.log('MathJax typeset error:', e));
+              else window.MathJax.typesetPromise().catch((e) => console.log('MathJax typeset error:', e));
+            } catch (e) {
+              console.log('Error flushing MathJax queue:', e);
+            }
+          }
+          window._mj_queue = [];
+        }
+      });
+    })();
+
     const SYSTEM_PROMPT =
       "You are an expert curriculum designer and information architect. Given a Topic and constraints, produce a clean, hierarchical table of contents. Focus on clarity, progressive depth, and coverage of the domain. Avoid fluff, keep titles concise, and add 1-sentence descriptions only when valuable.";
 
@@ -360,6 +406,10 @@ Requirements:
     // ----------------------- State -----------------------
     let RUNS = 0;
     let LIVE = true;  // server-backed by default
+  // File save state: lastFileHandle is kept in-memory for this session (allows overwrite when using
+  // the File System Access API). lastSavedFileName persists across sessions to suggest a name.
+  let lastFileHandle = null;
+  let lastSavedFileName = localStorage.getItem('lastSavedNotebookName') || null;
     let CURRENT_TOC = [];
     let BREAD = [];                 // [{id,title}, ...]
     const EXP_CACHE = new Map();    // nodeId -> children[]
@@ -610,9 +660,7 @@ Requirements:
 
       // Re-typeset MathJax after a short delay to ensure DOM is ready
       setTimeout(() => {
-        if (window.MathJax?.typesetPromise) {
-          window.MathJax.typesetPromise().catch(() => {});
-        }
+        typesetMath();
       }, 200);
     }
 
@@ -1583,9 +1631,7 @@ Requirements:
         if (levelContent) {
           levelContentDiv.innerHTML = renderMarkdown(levelContent);
           // Process math expressions with MathJax
-          if (window.MathJax && window.MathJax.typesetPromise) {
-            window.MathJax.typesetPromise([levelContentDiv]).catch((err) => console.log('MathJax typeset error:', err));
-          }
+          typesetMath(levelContentDiv);
         } else if (LEVEL_READING.has(`${node.id}@${activeLevel}`)) {
           levelContentDiv.innerHTML = "<p><em>Loading...</em></p>";
         } else {
@@ -1621,9 +1667,7 @@ Requirements:
         
         wrap.appendChild(rb);
         // Process math expressions with MathJax
-        if (window.MathJax && window.MathJax.typesetPromise) {
-          window.MathJax.typesetPromise([rb]).catch((err) => console.log('MathJax typeset error:', err));
-        }
+        typesetMath(rb);
         }
 
       // Add chat interface (always show for nodes with content or levels enabled)
@@ -1657,6 +1701,8 @@ Requirements:
         });
         if (chatHistory.length > 0) {
           messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          // Ensure any math in historical messages gets typeset
+          typesetMath(messagesContainer);
         }
 
         // Add chat event listeners
@@ -1769,9 +1815,7 @@ Requirements:
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
         CHAT_HISTORY.get(node.id).push({ role: 'assistant', content: answer, ts: new Date().toISOString() });
 
-        if (window.MathJax?.typesetPromise) {
-          window.MathJax.typesetPromise([assistantMsgDiv]).catch(()=>{});
-        }
+        typesetMath(assistantMsgDiv);
         
         autosave();
       } catch (e) {
