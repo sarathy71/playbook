@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Topic Browser — TOC Generator</title>
+  <title>Playbook</title>
   <!-- MathJax for math rendering -->
   <script>
     MathJax = {
@@ -18,7 +18,6 @@
       }
     };
   </script>
-  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
   <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
   <style>
@@ -117,80 +116,119 @@
     .undo-btn { font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--ring); background:#fff; cursor:pointer; color:var(--muted); }
     .undo-btn:hover { background:#f8f9fa; color:var(--ink); }
     .undo-btn:disabled { opacity:0.5; cursor:not-allowed; }
+    .levels-toggle { font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--ring); background:#fff; cursor:pointer; color:var(--muted); display:inline-flex; align-items:center; }
+    .levels-toggle:hover { background:#f8f9fa; color:var(--ink); }
+    .levels-toggle.active { background:#e3f2fd; color:#1565c0; border-color:#1565c0; }
+    .levels-toggle input[type="checkbox"] { margin:0; margin-right:4px; }
+    .gear-icon { position:absolute; top:20px; right:20px; width:24px; height:24px; cursor:pointer; color:var(--muted); transition:color 0.2s; }
+    .gear-icon:hover { color:var(--ink); }
+    .settings-panel { position:absolute; top:50px; right:20px; background:#fff; border:1px solid var(--ring); border-radius:8px; padding:16px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:1000; min-width:280px; display:none; }
+    .settings-panel.show { display:block; }
+    .settings-group { margin-bottom:16px; }
+    .settings-group:last-child { margin-bottom:0; }
+    .settings-label { font-size:12px; font-weight:600; color:var(--ink); margin-bottom:8px; display:block; }
+    .settings-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+    .settings-row:last-child { margin-bottom:0; }
+    .settings-row label { font-size:11px; color:var(--muted); white-space:nowrap; }
+    .settings-row input, .settings-row select { font-size:11px; padding:4px 6px; border:1px solid var(--ring); border-radius:4px; }
+    .settings-row input[type="range"] { flex:1; }
+    .settings-row .value { font-size:10px; color:var(--muted); min-width:30px; text-align:right; }
+    .levels-tabs { display:flex; gap:4px; margin:8px 0; flex-wrap:wrap; }
+    .level-tab { font-size:11px; padding:4px 8px; border-radius:4px; border:1px solid var(--ring); background:#fff; cursor:pointer; color:var(--muted); transition:all 0.2s; }
+    .level-tab:hover { background:#f8f9fa; color:var(--ink); }
+    .level-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
+    .level-tab.loading { opacity:0.6; cursor:not-allowed; }
+    .level-content { margin-top:8px; background:#fafafa; border:1px solid var(--ring); border-radius:12px; padding:10px; }
+    .level-content .MathJax { font-size: 1.1em; }
+    .level-content .MathJax_Display { margin: 0.5em 0; }
+    .level-content h1, .level-content h2, .level-content h3, .level-content h4, .level-content h5, .level-content h6 { margin: 0.5em 0 0.3em 0; font-weight: 600; }
+    .level-content h1 { font-size: 1.3em; }
+    .level-content h2 { font-size: 1.2em; }
+    .level-content h3 { font-size: 1.1em; }
+    .level-content p { margin: 0.5em 0; line-height: 1.5; }
+    .level-content ul, .level-content ol { margin: 0.5em 0; padding-left: 1.5em; }
+    .level-content li { margin: 0.2em 0; }
+    .level-content code { background: #f0f0f0; padding: 0.2em 0.4em; border-radius: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.9em; }
+    .level-content pre { background: #f0f0f0; padding: 0.8em; border-radius: 6px; overflow-x: auto; margin: 0.5em 0; }
+    .level-content pre code { background: none; padding: 0; }
+    .level-content blockquote { border-left: 3px solid var(--ring); padding-left: 1em; margin: 0.5em 0; color: var(--muted); }
+    .level-content strong { font-weight: 600; }
+    .level-content em { font-style: italic; }
     @media (max-width: 980px) { .row { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="toolbar" style="justify-content:space-between; margin-bottom: 12px;">
-      <div class="title">Topic Browser — TOC Generator</div>
-      <div class="flex">
-        <span class="pill">Status: <span id="statusText">Mock</span></span>
-        <button id="btnGen" class="btn">Generate TOC</button>
+    <div class="toolbar" style="justify-content:center; margin-bottom: 12px; position:relative;">
+      <div class="title" style="position:absolute; left:0;">Playbook</div>
+      <div class="flex" style="justify-content:center;">
+        <input id="inpTopic" type="text" placeholder="e.g., Neural Networks, Ramayana, Corporate Finance" style="margin-right: 8px; padding: 8px 12px; border: 1px solid var(--ring); border-radius: 6px; font-size: 14px; min-width: 300px;" />
+        <button id="btnGen" class="btn">Learn</button>
       </div>
+      
+      <!-- Settings Panel -->
+      <div class="gear-icon" onclick="toggleSettings()" title="Settings">
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
+        </svg>
     </div>
 
-    <!-- Inputs -->
-    <div class="row">
-      <div class="card grid">
-        <div>
-          <label>Topic</label>
-          <input id="inpTopic" type="text" placeholder="e.g., Neural Networks, Ramayana, Corporate Finance" />
+      <div class="settings-panel" id="settingsPanel">
+        <div class="settings-group">
+          <label class="settings-label">Content Settings</label>
+          <div class="settings-row">
+            <label for="inpAudience">Audience:</label>
+            <input type="text" id="inpAudience" value="general" placeholder="e.g., high school students..." />
         </div>
-        <div class="row-1">
-          <div class="grid" style="grid-template-columns: 1fr 1fr;">
-            <div>
-              <label>Audience</label>
-              <input id="inpAudience" type="text" value="general" />
+          <div class="settings-row">
+            <label for="inpDepth">Depth:</label>
+            <input type="number" id="inpDepth" min="1" max="6" value="3" style="width:60px;" />
             </div>
-            <div>
-              <label>Depth (levels)</label>
-              <input id="inpDepth" type="number" min="1" max="6" value="3" />
+          <div class="settings-row">
+            <label for="inpSections">Sections:</label>
+            <input type="number" id="inpSections" min="2" max="12" value="5" style="width:60px;" />
             </div>
-            <div>
-              <label>Approx sections/level</label>
-              <input id="inpSections" type="number" min="2" max="12" value="5" />
             </div>
-            <div>
-              <label>Model</label>
+        
+        <div class="settings-group">
+          <label class="settings-label">Model Settings</label>
+          <div class="settings-row">
+            <label for="selModel">Model:</label>
               <select id="selModel">
                 <option value="gpt-4.1-mini">gpt-4.1-mini</option>
                 <option value="gpt-4.1">gpt-4.1</option>
                 <option value="gpt-5-mini">gpt-5-mini</option>
               </select>
             </div>
+          <div class="settings-row">
+            <label for="inpTemp">Temperature:</label>
+            <input type="range" id="inpTemp" min="0" max="1" step="0.05" value="0.3" />
+            <span class="value" id="tempVal">0.30</span>
           </div>
-          <div>
-            <label>Temperature (<span id="tempVal">0.30</span>)</label>
-            <input id="inpTemp" type="range" min="0" max="1" step="0.05" value="0.3" />
-          </div>
+          <div class="settings-row">
+            <label>
+              <input type="checkbox" id="chkLive" checked />
+              Use Live API
+            </label>
         </div>
       </div>
 
-      <div class="card grid">
-        <div class="flex">
-          <button id="btnUseMock" class="btn-ghost">Use Mock</button>
-          <button id="btnUseLive" class="btn">Use Live</button>
+        <div class="settings-group">
+          <label class="settings-label">Actions</label>
+          <div class="settings-row">
+            <button id="btnCopy" onclick="copyJSON()">Copy JSON</button>
+            <button id="btnSave" onclick="saveNotebook()">Save Notebook</button>
         </div>
-        <div class="space"></div>
-        <div class="footer">
-          Server handles API calls securely. Use Mock mode for testing UI without backend.
+          <div class="settings-row">
+            <button id="btnOpen" onclick="openNotebook()">Open Notebook</button>
+            <button id="btnUndo" onclick="undoLastChange()" disabled>Undo</button>
         </div>
-      </div>
-
-      <div class="card grid">
-        <div class="toolbar">
-          <button id="btnSaveNotebook" class="btn-ghost">Save Notebook</button>
-          <button id="btnOpenNotebook" class="btn-ghost">Open Notebook</button>
-          <button id="btnCopyJSON" class="btn-ghost">Copy JSON</button>
-          <button id="btnExportJSON" class="btn-ghost">Export JSON</button>
-          <button id="btnExportMD" class="btn-ghost">Export Markdown</button>
-          <button id="btnUndo" class="undo-btn" disabled>Undo</button>
-          <span class="right pill">Runs: <span id="runCount">0</span></span>
         </div>
-        <div id="errorBox" class="muted danger"></div>
       </div>
     </div>
+
+    <!-- Error Display -->
+    <div id="errorBox" class="muted danger" style="margin: 12px 0; padding: 8px 12px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; color: #dc2626; display: none;"></div>
 
     <div class="space"></div>
 
@@ -309,9 +347,13 @@ Requirements:
     const RUNS_HISTORY = [];        // [{ts, model, temperature, tokens, requestSummary}]
     const DEEP_DIVES = [];          // [{nodeId, selection: {text, snippet, offsets}, createdAt, newChildIds}]
     const UNDO_STACK = [];          // [{type, parentId, childrenIds, timestamp}]
+    const LEVELS_ENABLED = new Set(); // nodeId → whether Levels UI is enabled
+    const ACTIVE_LEVEL = new Map();   // nodeId → active level (1-10)
+    const LEVEL_CONTENT = new Map();  // nodeId → Map<level, content>
+    const LEVEL_READING = new Set();  // nodeId@level → in-flight read
 
     // ----------------------- Notebook Schema -----------------------
-    const NOTEBOOK_VERSION = "1.0.0";
+    const NOTEBOOK_VERSION = "1.1.0";
     const AUTOSAVE_KEY = "topic_browser_autosave";
     const AUTOSAVE_DEBOUNCE_MS = 2000;
     let autosaveTimeout = null;
@@ -348,12 +390,26 @@ Requirements:
         videos[nodeId] = videoList;
       }
 
+      // Serialize levels state
+      const levelsEnabled = Array.from(LEVELS_ENABLED);
+      const activeLevel = {};
+      for (const [nodeId, level] of ACTIVE_LEVEL) {
+        activeLevel[nodeId] = level;
+      }
+      const levelContent = {};
+      for (const [nodeId, levelMap] of LEVEL_CONTENT) {
+        levelContent[nodeId] = {};
+        for (const [level, content] of levelMap) {
+          levelContent[nodeId][level] = content;
+        }
+      }
+
       const notebook = {
         meta: {
           version: NOTEBOOK_VERSION,
           createdAt: now,
           updatedAt: now,
-          appVersion: "1.0.0",
+          appVersion: "1.1.0",
           platform: navigator.userAgent,
           topic: topic
         },
@@ -373,7 +429,10 @@ Requirements:
         chat,
         videos,
         runs: RUNS_HISTORY,
-        deepDives: DEEP_DIVES
+        deepDives: DEEP_DIVES,
+        levelsEnabled,
+        activeLevel,
+        levelContent
       };
 
       return notebook;
@@ -403,6 +462,42 @@ Requirements:
       BREAD = notebook.bread || [];
       RUNS_HISTORY.splice(0, RUNS_HISTORY.length, ...(notebook.runs || []));
       DEEP_DIVES.splice(0, DEEP_DIVES.length, ...(notebook.deepDives || []));
+      
+      // Restore levels state
+      LEVELS_ENABLED.clear();
+      if (notebook.levelsEnabled) {
+        for (const nodeId of notebook.levelsEnabled) {
+          LEVELS_ENABLED.add(nodeId);
+        }
+      }
+      
+      ACTIVE_LEVEL.clear();
+      if (notebook.activeLevel) {
+        for (const [nodeId, level] of Object.entries(notebook.activeLevel)) {
+          ACTIVE_LEVEL.set(nodeId, level);
+        }
+      }
+      
+      LEVEL_CONTENT.clear();
+      if (notebook.levelContent) {
+        for (const [nodeId, levelMap] of Object.entries(notebook.levelContent)) {
+          const map = new Map();
+          for (const [level, content] of Object.entries(levelMap)) {
+            map.set(parseInt(level), content);
+          }
+          LEVEL_CONTENT.set(nodeId, map);
+        }
+      }
+      
+      // Migration: if no levels state but has content, seed Level 5
+      if (notebook.version === "1.0.0" || (!notebook.levelsEnabled && notebook.content)) {
+        for (const [nodeId, content] of Object.entries(notebook.content || {})) {
+          if (content && !LEVEL_CONTENT.has(nodeId)) {
+            LEVEL_CONTENT.set(nodeId, new Map());
+            LEVEL_CONTENT.get(nodeId).set(5, content);
+          }
+        }
+      }
 
       // Clear and restore Maps
       EXP_CACHE.clear();
@@ -442,9 +537,14 @@ Requirements:
       }
 
       // Update UI counters
-      $("topCount").textContent = CURRENT_TOC.length;
-      $("runCount").textContent = RUNS_HISTORY.length;
-      $("resultTitle").textContent = notebook.config?.topic ? `TOC for: ${notebook.config.topic}` : "No topic yet";
+      const topCountEl = document.getElementById("topCount");
+      if (topCountEl) topCountEl.textContent = CURRENT_TOC.length;
+      
+      const runCountEl = document.getElementById("runCount");
+      if (runCountEl) runCountEl.textContent = RUNS_HISTORY.length;
+      
+      const resultTitleEl = document.getElementById("resultTitle");
+      if (resultTitleEl) resultTitleEl.textContent = notebook.config?.topic ? `TOC for: ${notebook.config.topic}` : "No topic yet";
 
       // Re-render everything
       renderTree(CURRENT_TOC, $("tree"));
@@ -467,7 +567,7 @@ Requirements:
         blobDownload(filename, jsonStr, "application/json");
       } catch (e) {
         console.error("Failed to save notebook:", e);
-        $("errorBox").textContent = `Failed to save notebook: ${e.message}`;
+        showError(`Failed to save notebook: ${e.message}`);
       }
     }
 
@@ -484,10 +584,10 @@ Requirements:
           try {
             const notebook = JSON.parse(e.target.result);
             deserializeNotebook(notebook);
-            $("errorBox").textContent = "";
+            showError("");
           } catch (err) {
             console.error("Failed to load notebook:", err);
-            $("errorBox").textContent = `Failed to load notebook: ${err.message}`;
+            showError(`Failed to load notebook: ${err.message}`);
           }
         };
         reader.readAsText(file);
@@ -538,7 +638,9 @@ Requirements:
     // ----------------------- Selection & Deep Dive Functions -----------------------
     function getSelectionInfo() {
       const selection = window.getSelection();
+      console.log("getSelectionInfo - selection:", selection);
       if (!selection || selection.rangeCount === 0 || selection.toString().trim().length === 0) {
+        console.log("getSelectionInfo - no valid selection");
         return null;
       }
 
@@ -561,7 +663,11 @@ Requirements:
         readbox = readbox.parentNode;
       }
       
-      if (!readbox) return null;
+      console.log("getSelectionInfo - readbox found:", readbox);
+      if (!readbox) {
+        console.log("getSelectionInfo - no readbox found");
+        return null;
+      }
 
       // Find the node ID by looking for the closest node container
       let nodeContainer = readbox;
@@ -569,7 +675,11 @@ Requirements:
         nodeContainer = nodeContainer.parentNode;
       }
       
-      if (!nodeContainer) return null;
+      console.log("getSelectionInfo - nodeContainer found:", nodeContainer);
+      if (!nodeContainer) {
+        console.log("getSelectionInfo - no nodeContainer found");
+        return null;
+      }
 
       // Extract node ID from the node container (look for data attribute or parse from structure)
       const nodeId = findNodeIdFromContainer(nodeContainer);
@@ -589,17 +699,21 @@ Requirements:
     }
 
     function findNodeIdFromContainer(container) {
+      console.log("findNodeIdFromContainer - container:", container);
       // Look for a data attribute first
       if (container.dataset?.nodeId) {
+        console.log("findNodeIdFromContainer - found nodeId in dataset:", container.dataset.nodeId);
         return container.dataset.nodeId;
       }
       
       // Fallback: look for node ID in the structure
       const idElement = container.querySelector('.id');
       if (idElement) {
+        console.log("findNodeIdFromContainer - found nodeId in .id element:", idElement.textContent.trim());
         return idElement.textContent.trim();
       }
       
+      console.log("findNodeIdFromContainer - no nodeId found");
       return null;
     }
 
@@ -711,6 +825,141 @@ Requirements:
       }
       findPath(CURRENT_TOC, nodeId);
       return path;
+    }
+
+    // ----------------------- Levels Management Functions -----------------------
+    function toggleLevels(nodeId) {
+      try {
+        if (LEVELS_ENABLED.has(nodeId)) {
+          // Turn OFF levels
+          LEVELS_ENABLED.delete(nodeId);
+          
+          // Restore Level 5 content to main CONTENT
+          const level5Content = LEVEL_CONTENT.get(nodeId)?.get(5) || "";
+          CONTENT.set(nodeId, level5Content);
+          
+          // Clear active level
+          ACTIVE_LEVEL.delete(nodeId);
+          
+        } else {
+          // Turn ON levels
+          LEVELS_ENABLED.add(nodeId);
+          
+          // Initialize level content map if not exists
+          if (!LEVEL_CONTENT.has(nodeId)) {
+            LEVEL_CONTENT.set(nodeId, new Map());
+          }
+          
+          // Seed Level 5 with existing content
+          const existingContent = CONTENT.get(nodeId) || "Click 'Read' to load a Level 5 explanation";
+          LEVEL_CONTENT.get(nodeId).set(5, existingContent);
+          
+          // Set active level to 5
+          ACTIVE_LEVEL.set(nodeId, 5);
+          
+          // Clear main content to avoid duplication
+          CONTENT.delete(nodeId);
+        }
+        
+        autosave();
+        renderTree(CURRENT_TOC, $("tree"));
+      } catch (error) {
+        console.error("Error toggling levels:", error);
+      }
+    }
+
+    function switchLevel(nodeId, level) {
+      try {
+        ACTIVE_LEVEL.set(nodeId, level);
+        
+        // If content not cached, fetch it
+        if (!LEVEL_CONTENT.get(nodeId)?.has(level)) {
+          fetchLevelContent(nodeId, level);
+        } else {
+          // Just re-render
+          renderTree(CURRENT_TOC, $("tree"));
+        }
+      } catch (error) {
+        console.error("Error switching level:", error);
+      }
+    }
+
+    async function fetchLevelContent(nodeId, level) {
+      const readingKey = `${nodeId}@${level}`;
+      if (LEVEL_READING.has(readingKey)) return;
+      
+      LEVEL_READING.add(readingKey);
+      renderTree(CURRENT_TOC, $("tree")); // Update UI to show "Loading..."
+      
+      try {
+        const node = findNodeById(CURRENT_TOC, nodeId);
+        if (!node) return;
+        
+        const path = getNodePath(nodeId);
+        const topic = $("inpTopic").value.trim();
+        const audience = $("inpAudience").value.trim() || "general";
+        const model = $("selModel").value;
+        const temperature = parseFloat($("inpTemp").value || "0.3");
+        
+        const resp = await fetch("/api/read", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ 
+            topic, audience, model, temperature, 
+            node: { id: node.id, title: node.title }, 
+            path, level 
+          })
+        });
+        
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        
+        // Store the content
+        if (!LEVEL_CONTENT.has(nodeId)) {
+          LEVEL_CONTENT.set(nodeId, new Map());
+        }
+        LEVEL_CONTENT.get(nodeId).set(level, data.content || "No content returned.");
+        
+        autosave();
+      } catch (e) {
+        console.error("Failed to fetch level content:", e);
+        showError(`Failed to load ${getLevelLabel(level)} content: ${e.message}`);
+      } finally {
+        LEVEL_READING.delete(readingKey);
+        renderTree(CURRENT_TOC, $("tree"));
+      }
+    }
+
+    function getLevelDescription(level) {
+      const descriptions = {
+        1: "Beginner - Simple analogies and examples",
+        2: "Basic - Core concepts with examples", 
+        3: "Introductory - Key ideas and intuition",
+        4: "Intermediate - Balanced explanation",
+        5: "Standard - Comprehensive overview",
+        6: "Advanced - Detailed with some math",
+        7: "Expert - Rigorous with derivations",
+        8: "Specialist - Formal treatment",
+        9: "Research - Cutting-edge concepts",
+        10: "Expert-level - Maximum formalism"
+      };
+      return descriptions[level] || `Level ${level}`;
+    }
+
+    function getLevelLabel(level) {
+      const labels = {
+        1: "Beginner",
+        2: "Learner", 
+        3: "Student",
+        4: "Intermediate",
+        5: "Standard",
+        6: "Advanced",
+        7: "Expert",
+        8: "Specialist",
+        9: "Researcher",
+        10: "Master"
+      };
+      return labels[level] || `Level ${level}`;
     }
 
     async function diveDeep() {
@@ -872,7 +1121,7 @@ Requirements:
 
       } catch (e) {
         console.error("Deep dive failed:", e);
-        $("errorBox").textContent = `Deep dive failed: ${e.message}`;
+        showError(`Deep dive failed: ${e.message}`);
         hideSelectionToolbar();
       }
     }
@@ -954,12 +1203,16 @@ Requirements:
 
       // Check if this is a deep dive wrapper
       const isDeepDiveWrapper = DEEP_DIVES.some(dd => dd.wrapperId === node.id);
-      
+
       const txt = document.createElement("div");
       txt.innerHTML =
         `<div class="node-title-row"><span style="font-weight:600">${node.title}</span>
            ${isDeepDiveWrapper ? '<span class="deepdive-chip" title="Created from text selection">Deep Dive</span>' : ''}
            <button class="readbtn" ${READING.has(node.id) ? "disabled": ""} data-read="${node.id}">${READING.has(node.id) ? "Reading…" : "Read"}</button>
+           <label class="levels-toggle ${LEVELS_ENABLED.has(node.id) ? 'active' : ''}" data-levels="${node.id}">
+             <input type="checkbox" ${LEVELS_ENABLED.has(node.id) ? 'checked' : ''} style="margin-right: 4px;">
+             Levels
+           </label>
            <button class="readbtn" ${FETCHING_VIDEOS.has(node.id) ? "disabled": ""} data-videos="${node.id}">${FETCHING_VIDEOS.has(node.id) ? "Fetching…" : "Suggest videos"}</button>
          </div>` +
         (node.description ? `<div class="desc">${node.description}</div>` : "") +
@@ -973,6 +1226,19 @@ Requirements:
       txt.querySelector('button[data-read]').addEventListener('click', async (ev) => {
         ev.stopPropagation();
         await readSection(node, path.concat({ id: node.id, title: node.title }));
+      });
+
+      // LEVELS checkbox (independent of expand/collapse)
+      const levelsToggle = txt.querySelector('label[data-levels]');
+      const levelsCheckbox = levelsToggle.querySelector('input[type="checkbox"]');
+      levelsCheckbox.addEventListener('change', (ev) => {
+        ev.stopPropagation();
+        toggleLevels(node.id);
+      });
+      // Also handle clicking the label
+      levelsToggle.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        // Don't toggle here since the checkbox change event will handle it
       });
 
       // SUGGEST VIDEOS button (independent of expand/collapse)
@@ -1009,7 +1275,48 @@ Requirements:
       }
 
       // Explanation content (if any)
-      if (CONTENT.has(node.id)) {
+      if (LEVELS_ENABLED.has(node.id)) {
+        // Levels mode: show tabs and level content
+        const activeLevel = ACTIVE_LEVEL.get(node.id) || 5;
+        
+        // Create tabs container
+        const tabsContainer = document.createElement("div");
+        tabsContainer.className = "levels-tabs";
+        
+        // Create tabs for levels 1-10
+        for (let level = 1; level <= 10; level++) {
+          const tab = document.createElement("button");
+          tab.className = "level-tab";
+          if (level === activeLevel) tab.classList.add("active");
+          if (LEVEL_READING.has(`${node.id}@${level}`)) tab.classList.add("loading");
+          tab.textContent = getLevelLabel(level);
+          tab.title = getLevelDescription(level); // Add tooltip with full description
+          tab.onclick = () => switchLevel(node.id, level);
+          tabsContainer.appendChild(tab);
+        }
+        wrap.appendChild(tabsContainer);
+        
+        // Create level content container
+        const levelContentDiv = document.createElement("div");
+        levelContentDiv.className = "level-content";
+        
+        const levelContent = LEVEL_CONTENT.get(node.id)?.get(activeLevel);
+        if (levelContent) {
+          levelContentDiv.innerHTML = renderMarkdown(levelContent);
+          // Process math expressions with MathJax
+          if (window.MathJax && window.MathJax.typesetPromise) {
+            window.MathJax.typesetPromise([levelContentDiv]).catch((err) => console.log('MathJax typeset error:', err));
+          }
+        } else if (LEVEL_READING.has(`${node.id}@${activeLevel}`)) {
+          levelContentDiv.innerHTML = "<p><em>Loading...</em></p>";
+        } else {
+          levelContentDiv.innerHTML = `<p><em>Click to load ${getLevelLabel(activeLevel)} content</em></p>`;
+        }
+        
+        wrap.appendChild(levelContentDiv);
+        
+      } else if (CONTENT.has(node.id)) {
+        // Single content mode: show regular readbox
         const rb = document.createElement("div");
         rb.className = "readbox";
         const markdownContent = CONTENT.get(node.id);
@@ -1019,12 +1326,16 @@ Requirements:
         if (window.MathJax && window.MathJax.typesetPromise) {
           window.MathJax.typesetPromise([rb]).catch((err) => console.log('MathJax typeset error:', err));
         }
+        }
 
-        // Add chat interface
+      // Add chat interface (always show for nodes with content or levels enabled)
+      if (CONTENT.has(node.id) || LEVELS_ENABLED.has(node.id)) {
         const chatContainer = document.createElement("div");
         chatContainer.className = "chat-container";
+        // Create chat header with level information
+        const levelInfo = LEVELS_ENABLED.has(node.id) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(node.id) || 5)})` : "";
         chatContainer.innerHTML = `
-          <div class="chat-header">Ask questions about "${node.title}"</div>
+          <div class="chat-header">Ask questions about "${node.title}"${levelInfo}</div>
           <div class="chat-messages" id="chat-messages-${node.id}"></div>
           <div class="chat-input-container">
             <input type="text" class="chat-input" id="chat-input-${node.id}" placeholder="Ask a question..." />
@@ -1065,6 +1376,7 @@ Requirements:
         chatInput.addEventListener('keypress', (e) => {
           if (e.key === 'Enter') sendMessage();
         });
+      }
 
         // Add video suggestions if they exist
         if (VIDEOS.has(node.id)) {
@@ -1094,7 +1406,6 @@ Requirements:
             });
             videoGrid.appendChild(videoDiv);
           });
-        }
       }
 
       return wrap;
@@ -1131,15 +1442,25 @@ Requirements:
           const model = $("selModel").value;
           const temperature = parseFloat($("inpTemp").value || "0.3");
           const history = CHAT_HISTORY.get(node.id) || [];
-          const context = CONTENT.get(node.id) || "(no content)";
+          // Use level-specific content if levels are enabled, otherwise use regular content
+          let context = "(no content)";
+          if (LEVELS_ENABLED.has(node.id)) {
+            const activeLevel = ACTIVE_LEVEL.get(node.id) || 5;
+            context = LEVEL_CONTENT.get(node.id)?.get(activeLevel) || `${getLevelLabel(activeLevel)} explanation not loaded`;
+          } else {
+            context = CONTENT.get(node.id) || "(no content)";
+          }
 
+          // Include level information in chat request
+          const level = LEVELS_ENABLED.has(node.id) ? (ACTIVE_LEVEL.get(node.id) || 5) : null;
+          
           const resp = await fetch("/api/chat", {
-            method: "POST",
+              method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ topic, audience, model, temperature, node: { id: node.id, title: node.title }, path, question, context, history })
+            body: JSON.stringify({ topic, audience, model, temperature, node: { id: node.id, title: node.title }, path, question, context, history, level })
           });
           if (!resp.ok) throw new Error(await resp.text());
-          const data = await resp.json();
+            const data = await resp.json();
           answer = data.answer || "No answer.";
         }
 
@@ -1173,15 +1494,15 @@ Requirements:
       FETCHING_VIDEOS.add(node.id); renderTree(CURRENT_TOC, $("tree"));
 
       try {
-        const topic = $("inpTopic").value.trim();
+          const topic = $("inpTopic").value.trim();
         const q = encodeURIComponent(`${node.title} ${topic}`.trim());
         const resp = await fetch(`/api/videos?q=${q}`);
         if (!resp.ok) throw new Error(await resp.text());
-        const data = await resp.json();
+          const data = await resp.json();
         VIDEOS.set(node.id, data.videos || []);
         autosave();
       } catch (e) {
-        $("errorBox").textContent = e.message || String(e);
+        showError(e.message || String(e));
       } finally {
         FETCHING_VIDEOS.delete(node.id);
         renderTree(CURRENT_TOC, $("tree"));
@@ -1210,7 +1531,8 @@ Requirements:
         return false;
       }
       visit(CURRENT_TOC);
-      $("topCount").textContent = CURRENT_TOC.length;
+      const topCountEl = document.getElementById("topCount");
+      if (topCountEl) topCountEl.textContent = CURRENT_TOC.length;
       renderTree(CURRENT_TOC, $("tree"));
       renderBreadcrumb();
     }
@@ -1232,7 +1554,7 @@ Requirements:
           await expandSection(node, path);
         } catch (e) {
           console.warn("Expansion failed:", e);
-          $("errorBox").textContent = e.message || String(e);
+          showError(e.message || String(e));
         }
       } else {
         // Mock expansion when no children yet
@@ -1274,12 +1596,28 @@ Requirements:
       if (!LIVE) {
         // keep your mock as-is
         const mock = `Summary of "${node.title}":\n• ...\n\n$$\\int_0^1 x^2 dx = 1/3$$`;
+        if (LEVELS_ENABLED.has(node.id)) {
+          // In levels mode, add to level 5
+          if (!LEVEL_CONTENT.has(node.id)) {
+            LEVEL_CONTENT.set(node.id, new Map());
+          }
+          LEVEL_CONTENT.get(node.id).set(5, mock);
+        } else {
         CONTENT.set(node.id, mock);
+        }
         renderTree(CURRENT_TOC, $("tree")); renderBreadcrumb();
         autosave();
         return;
       }
 
+      // If levels are enabled, refresh the current active level
+      if (LEVELS_ENABLED.has(node.id)) {
+        const activeLevel = ACTIVE_LEVEL.get(node.id) || 5;
+        await fetchLevelContent(node.id, activeLevel);
+        return;
+      }
+
+      // Regular single content mode
       if (READING.has(node.id)) return;
       READING.add(node.id); renderTree(CURRENT_TOC, $("tree"));
 
@@ -1301,7 +1639,7 @@ Requirements:
         CONTENT.set(node.id, data.content || "No content returned.");
         autosave();
       } catch (e) {
-        $("errorBox").textContent = e.message || String(e);
+        showError(e.message || String(e));
       } finally {
         READING.delete(node.id);
         renderTree(CURRENT_TOC, $("tree"));
@@ -1318,10 +1656,11 @@ Requirements:
       const model = $("selModel").value;
       const temperature = parseFloat($("inpTemp").value || "0.3");
 
-      $("errorBox").textContent = "";
-      $("btnGen").disabled = true; $("btnGen").textContent = "Generating…";
-      BREAD = []; EXP_CACHE.clear(); CONTENT.clear(); READING.clear(); EXPANDED.clear(); CHAT_HISTORY.clear(); CHATTING.clear(); VIDEOS.clear(); FETCHING_VIDEOS.clear();
-      $("resultTitle").textContent = topic ? `TOC for: ${topic}` : "No topic yet";
+      showError("");
+      $("btnGen").disabled = true; $("btnGen").textContent = "Thinking…";
+      BREAD = []; EXP_CACHE.clear(); CONTENT.clear(); READING.clear(); EXPANDED.clear(); CHAT_HISTORY.clear(); CHATTING.clear(); VIDEOS.clear(); FETCHING_VIDEOS.clear(); LEVELS_ENABLED.clear(); ACTIVE_LEVEL.clear(); LEVEL_CONTENT.clear(); LEVEL_READING.clear();
+      const resultTitleEl = document.getElementById("resultTitle");
+      if (resultTitleEl) resultTitleEl.textContent = topic ? `TOC for: ${topic}` : "No topic yet";
 
       try {
         let result;
@@ -1345,9 +1684,12 @@ Requirements:
         }
         CURRENT_TOC = result.toc || [];
         CURRENT_TOC.forEach(n => EXPANDED.add(n.id));
-        $("topCount").textContent = CURRENT_TOC.length;
+        const topCountEl = document.getElementById("topCount");
+        if (topCountEl) topCountEl.textContent = CURRENT_TOC.length;
         renderTree(CURRENT_TOC, $("tree"));
-        RUNS += 1; $("runCount").textContent = RUNS;
+        RUNS += 1; 
+        const runCountEl = document.getElementById("runCount");
+        if (runCountEl) runCountEl.textContent = RUNS;
         
         // Track run history
         RUNS_HISTORY.push({
@@ -1360,9 +1702,9 @@ Requirements:
         
         autosave();
       } catch (e) {
-        $("errorBox").textContent = e.message || String(e);
+        showError(e.message || String(e));
       } finally {
-        $("btnGen").disabled = false; $("btnGen").textContent = "Generate TOC";
+        $("btnGen").disabled = false; $("btnGen").textContent = "Learn";
       }
     }
 
@@ -1397,15 +1739,18 @@ Requirements:
     }
 
     // ----------------------- Hooks -----------------------
-    $("inpTemp").addEventListener("input", (e) => $("tempVal").textContent = Number(e.target.value).toFixed(2));
     $("btnGen").addEventListener("click", generate);
-    $("btnSaveNotebook").addEventListener("click", saveNotebook);
-    $("btnOpenNotebook").addEventListener("click", openNotebook);
-    $("btnCopyJSON").addEventListener("click", copyJSON);
-    $("btnExportJSON").addEventListener("click", exportJSON);
-    $("btnExportMD").addEventListener("click", exportMD);
-    $("btnUseMock").addEventListener("click", () => { LIVE = false; $("statusText").textContent = "Mock"; });
-    $("btnUseLive").addEventListener("click", () => { LIVE = true; $("statusText").textContent = "Live"; });
+    $("btnSave").addEventListener("click", saveNotebook);
+    $("btnOpen").addEventListener("click", openNotebook);
+    $("btnCopy").addEventListener("click", copyJSON);
+    $("chkLive").addEventListener("change", (e) => { 
+      LIVE = e.target.checked; 
+      // Update status display if it exists
+      const statusText = document.getElementById("statusText");
+      if (statusText) {
+        statusText.textContent = LIVE ? "Live" : "Mock";
+      }
+    });
     $("btnUndo").addEventListener("click", undoLastChange);
 
     // Selection toolbar event listeners
@@ -1416,6 +1761,7 @@ Requirements:
     // Selection handling
     document.addEventListener("selectionchange", () => {
       const selectionInfo = getSelectionInfo();
+      console.log("Selection change detected:", selectionInfo);
       if (selectionInfo) {
         showSelectionToolbar(selectionInfo);
       } else {
@@ -1427,6 +1773,7 @@ Requirements:
     document.addEventListener("mouseup", () => {
       setTimeout(() => {
         const selectionInfo = getSelectionInfo();
+        console.log("Mouseup selection detected:", selectionInfo);
         if (selectionInfo) {
           showSelectionToolbar(selectionInfo);
         } else {
@@ -1460,14 +1807,50 @@ Requirements:
       }
     });
 
+    // Settings panel toggle
+    function toggleSettings() {
+      const panel = document.getElementById('settingsPanel');
+      panel.classList.toggle('show');
+    }
+
+    // Error display helper
+    function showError(message) {
+      const errorBox = document.getElementById('errorBox');
+      if (message) {
+        errorBox.textContent = message;
+        errorBox.style.display = 'block';
+      } else {
+        errorBox.style.display = 'none';
+      }
+    }
+
+    // Close settings panel when clicking outside
+    document.addEventListener('click', (e) => {
+      const panel = document.getElementById('settingsPanel');
+      const gearIcon = document.querySelector('.gear-icon');
+      if (panel && !panel.contains(e.target) && !gearIcon.contains(e.target)) {
+        panel.classList.remove('show');
+      }
+    });
+
     // Initialize autosave on page load
     document.addEventListener("DOMContentLoaded", () => {
-      // Try to load autosave on startup
-      if (!loadAutosave()) {
-        // If no autosave was loaded, set up autosave for future changes
-        autosave();
+      try {
+        // Set up event listeners for settings panel inputs
+        document.getElementById('inpTemp').addEventListener('input', (e) => {
+          document.getElementById('tempVal').textContent = parseFloat(e.target.value).toFixed(2);
+        });
+
+        // Try to load autosave on startup
+        if (!loadAutosave()) {
+          // If no autosave was loaded, set up autosave for future changes
+          autosave();
+        }
+        updateUndoButton();
+        console.log("Topic Browser initialized successfully");
+      } catch (error) {
+        console.error("Error initializing Topic Browser:", error);
       }
-      updateUndoButton();
     });
   </script>
 </body>

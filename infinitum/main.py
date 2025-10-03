@@ -174,14 +174,32 @@ def api_read():
     sections = int(body.get("sections", 5))
     model = body.get("model", "gpt-4.1-mini")
     temperature = float(body.get("temperature", 0.3))
+    level = int(body.get("level", 5))  # Default to level 5 if not specified
     if not topic or not node:
         abort(400, "Missing topic or node.")
+
+    # Level-aware prompting
+    level_descriptions = {
+        1: "Explain as if to a curious child or complete newcomer: use simple analogies, everyday examples, avoid jargon, no complex formulas unless absolutely necessary.",
+        2: "Explain for someone with basic knowledge: use simple concepts and examples, minimal technical terms, focus on understanding over precision.",
+        3: "Explain for an introductory learner: use key concepts and intuition, some examples, basic terminology, avoid advanced mathematics.",
+        4: "Explain for an intermediate learner: balanced explanation with some technical details, examples and intuition, moderate use of terminology.",
+        5: "Explain for an informed learner: comprehensive overview with good balance of intuition and technical details, standard terminology.",
+        6: "Explain for an advanced learner: detailed explanation with mathematical concepts, technical terminology, some derivations.",
+        7: "Explain for an expert: rigorous treatment with derivations, formal definitions, advanced mathematics, technical precision.",
+        8: "Explain for a specialist: formal treatment with proofs, advanced formalism, specialized terminology, research-level concepts.",
+        9: "Explain for a researcher: cutting-edge concepts, advanced formalism, open problems, research-level depth.",
+        10: "Explain at maximum expertise level: complete formalism, rigorous proofs, advanced mathematics, research-level precision."
+    }
+    
+    level_instruction = level_descriptions.get(level, level_descriptions[5])
 
     user_prompt = f"""
 Write a clear, well-structured explanation (250–450 words) for the selected outline item. Use Markdown and LaTeX for math.
 
 Global Topic: {topic}
 Audience: {audience}
+Proficiency Level: {level}/10 - {level_instruction}
 Depth preference (context): {depth}
 Approx sections per level (context): {sections}
 
@@ -192,6 +210,7 @@ Current Item ID: {node.get('id','')}
 Style:
 - Use paragraphs and short bullet lists where helpful.
 - Inline math: $...$ ; display math: $$...$$
+- Match the requested proficiency level exactly: {level_instruction}
 - No JSON.
 """.strip()
 
@@ -212,13 +231,31 @@ def api_chat():
     question = (body.get("question") or "").strip()
     context = body.get("context") or ""  # the 'Read' content under the node
     history = body.get("history") or []  # [{role, content}...]
+    level = body.get("level")  # Optional level for level-aware responses
 
     if not topic or not node or not question:
         abort(400, "Missing topic, node, or question.")
 
+    # Level-aware system prompt
+    level_instruction = ""
+    if level:
+        level_descriptions = {
+            1: "Answer as if speaking to a curious child: use simple analogies, avoid jargon, focus on understanding.",
+            2: "Answer for someone with basic knowledge: use simple concepts, minimal technical terms.",
+            3: "Answer for an introductory learner: use key concepts and intuition, basic terminology.",
+            4: "Answer for an intermediate learner: balanced explanation with some technical details.",
+            5: "Answer for an informed learner: comprehensive overview with good balance of intuition and technical details.",
+            6: "Answer for an advanced learner: detailed explanation with mathematical concepts, technical terminology.",
+            7: "Answer for an expert: rigorous treatment with derivations, formal definitions, advanced mathematics.",
+            8: "Answer for a specialist: formal treatment with proofs, advanced formalism, specialized terminology.",
+            9: "Answer for a researcher: cutting-edge concepts, advanced formalism, research-level depth.",
+            10: "Answer at maximum expertise level: complete formalism, rigorous proofs, advanced mathematics."
+        }
+        level_instruction = f" Match the requested proficiency level {level}/10: {level_descriptions.get(level, level_descriptions[5])}."
+
     system = (
         "Answer strictly using the provided section context unless the question is generic. "
-        "Be concise and clear. Use Markdown and LaTeX for math when appropriate."
+        "Be concise and clear. Use Markdown and LaTeX for math when appropriate." + level_instruction
     )
 
     messages = [
