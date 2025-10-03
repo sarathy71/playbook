@@ -1,14 +1,19 @@
 import os
 import json
 import uuid
+import datetime
 from flask import Flask, request, jsonify, render_template, abort
 from dotenv import load_dotenv
 import requests
+from openai import OpenAI
 
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")  # optional
+
+# Initialize OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 app = Flask(__name__)
 
@@ -472,6 +477,262 @@ def api_notebook_load():
     # In a real implementation, you'd load from a database
     # For now, return a 404 since we don't have persistence implemented
     abort(404, "Notebook not found. Server-side persistence not yet implemented.")
+
+@app.route("/api/visualize/eligibility", methods=["POST"])
+def visualize_eligibility():
+    """Determine if a node would benefit from visualization"""
+    try:
+        body = request.get_json()
+        node = body.get("node", {})
+        content = body.get("content", "")
+        topic = body.get("topic", "")
+        
+        if not node.get("title"):
+            return jsonify({"ok": False, "score": 0, "rationale": "No node title provided"})
+        
+        # Create eligibility prompt
+        eligibility_prompt = f"""
+You are a visual pedagogy classifier. Determine if a single static image would significantly aid understanding for most learners.
+
+Topic: {topic}
+Node: {node.get('title', '')}
+Description: {node.get('description', '')}
+Content: {content[:2000] if content else 'No content yet'}
+
+Examples of GOOD fits for visualization:
+- Physical systems (mechanics, thermodynamics, fluid dynamics)
+- Geometric concepts (shapes, curves, transformations)
+- Process flows (algorithms, workflows, life cycles)
+- Maps and spatial relationships
+- Component diagrams (networks, hierarchies, structures)
+- Data relationships (charts, graphs, correlations)
+- Timelines and sequences
+
+Examples of POOR fits:
+- Pure opinions or subjective content
+- Trivia or memorization facts
+- Social etiquette or cultural norms
+- Abstract philosophical concepts without concrete examples
+- Text-heavy explanations without visual elements
+
+Return ONLY a JSON object with:
+- "ok": boolean (true if a single static image would significantly help)
+- "score": number 0-10 (confidence in the decision)
+- "rationale": string (brief explanation of the decision)
+
+Focus on whether a single static image would materially improve learning for most people.
+"""
+        
+        response = client.chat.completions.create(
+            model=body.get("model", "gpt-4o"),
+            messages=[
+                {"role": "system", "content": "You are a visual pedagogy classifier. Return only valid JSON with ok, score, and rationale fields."},
+                {"role": "user", "content": eligibility_prompt}
+            ],
+            temperature=0.2,
+            max_tokens=200,
+            response_format={"type": "json_object"}
+        )
+        
+        result = response.choices[0].message.content
+        eligibility_data = json.loads(result)
+        
+        return jsonify(eligibility_data)
+        
+    except Exception as e:
+        # Return safe default on error
+        return jsonify({"ok": False, "score": 0, "rationale": f"Error: {str(e)}"})
+
+# In-memory cache for visualizations (in production, use Redis or database)
+visualization_cache = {}
+user_daily_limits = {}  # Track daily usage per user
+
+@app.route("/api/visualize", methods=["POST"])
+def visualize():
+    """Generate a visual representation of the content using OpenAI Images API"""
+    try:
+        body = request.get_json()
+        node = body.get("node", {})
+        content = body.get("content", "")
+        topic = body.get("topic", "")
+        
+        if not node.get("title"):
+            return jsonify({"error": "No node title provided"}), 400
+        
+        # Create cache key
+        content_hash = str(hash(content))[:16]  # First 16 chars of hash
+        cache_key = f"{topic}:{node.get('id', '')}:{content_hash}"
+        
+        # Check cache first
+        if cache_key in visualization_cache:
+            cached_result = visualization_cache[cache_key]
+            print(f"Cache hit for {cache_key}")
+            return jsonify({
+                "imageUrl": cached_result["imageUrl"],
+                "caption": cached_result["caption"],
+                "success": True,
+                "cached": True
+            })
+        
+        # Rate limiting (simple per-IP daily limit)
+        client_ip = request.remote_addr or "unknown"
+        today = str(datetime.date.today())
+        user_key = f"{client_ip}:{today}"
+        
+        if user_key not in user_daily_limits:
+            user_daily_limits[user_key] = 0
+        
+        if user_daily_limits[user_key] >= 20:  # 20 visualizations per day per IP
+            return jsonify({"error": "Daily visualization limit reached"}), 429
+        
+        # Step A: Planning via LLM
+        planning_prompt = f"""
+You are an educational diagram/visual planner. Create a specification for a single educational image.
+
+Topic: {topic}
+Node: {node.get('title', '')}
+Description: {node.get('description', '')}
+Content: {content[:2000] if content else 'No content yet'}
+
+Return ONLY a JSON object with:
+- "prompt": string (crisp, concrete scene spec for a single diagram/plot/map/schematic)
+- "caption": string (exactly one sentence, ≤ 25 words, describing the image)
+
+Requirements:
+- Prefer labeled axes, minimal colors, clear legends, readable typography
+- Avoid text-heavy scenes
+- Focus on a single, clear visual concept
+- Make it educational and informative
+- Use clear, descriptive language for image generation
+"""
+        
+        planning_response = client.chat.completions.create(
+            model=body.get("model", "gpt-4o"),
+            messages=[
+                {"role": "system", "content": "You are an educational diagram planner. Return only valid JSON with prompt and caption fields."},
+                {"role": "user", "content": planning_prompt}
+            ],
+            temperature=0.3,
+            max_tokens=300,
+            response_format={"type": "json_object"}
+        )
+        
+        planning_result = json.loads(planning_response.choices[0].message.content)
+        image_prompt = planning_result.get("prompt", "")
+        caption = planning_result.get("caption", "")
+        
+        # Enforce caption rules server-side
+        if caption:
+            # Take only first sentence
+            sentences = caption.split('.')
+            caption = sentences[0].strip()
+            if not caption.endswith('.'):
+                caption += '.'
+            # Truncate if too long (≤ 25 words)
+            words = caption.split()
+            if len(words) > 25:
+                caption = ' '.join(words[:25]) + '...'
+        
+        if not caption:
+            caption = f"Visualization for {node.get('title', '')}"
+        
+        # Step B: Generate image using OpenAI Images API
+        try:
+            print(f"Generating image for {node.get('title', '')} with prompt: {image_prompt[:100]}...")
+            image_response = client.images.generate(
+                model="dall-e-3",
+                prompt=image_prompt,
+                size="1024x1024",
+                quality="standard",
+                n=1
+            )
+            
+            image_url = image_response.data[0].url
+            print(f"Image generated successfully: {image_url}")
+            
+            # Cache the result
+            visualization_cache[cache_key] = {
+                "imageUrl": image_url,
+                "caption": caption
+            }
+            
+            # Update rate limit
+            user_daily_limits[user_key] += 1
+            
+            return jsonify({
+                "imageUrl": image_url,
+                "caption": caption,
+                "success": True
+            })
+            
+        except Exception as img_error:
+            # Fallback to placeholder if image generation fails
+            print(f"Image generation failed: {img_error}")
+            fallback_url = f"https://picsum.photos/1024/1024?random={hash(image_prompt) % 1000}"
+            
+            # Still cache the fallback
+            visualization_cache[cache_key] = {
+                "imageUrl": fallback_url,
+                "caption": caption
+            }
+            
+            return jsonify({
+                "imageUrl": fallback_url,
+                "caption": caption,
+                "success": True,
+                "fallback": True
+            })
+        
+    except Exception as e:
+        return jsonify({"error": f"Visualization unavailable right now: {str(e)}"}), 500
+
+@app.route("/api/summary", methods=["POST"])
+def generate_summary():
+    """Generate a 3-4 sentence summary of the content"""
+    try:
+        body = request.get_json()
+        node = body.get("node", {})
+        content = body.get("content", "")
+        
+        if not content.strip():
+            return jsonify({"error": "No content provided for summary"}), 400
+        
+        # Create a prompt for summary generation
+        user_prompt = f"""
+Create a concise 3-4 sentence summary of the following content:
+
+Topic: {body.get('topic', '')}
+Node: {node.get('title', '')}
+
+Content:
+{content}
+
+Requirements:
+- Keep it to exactly 3-4 sentences
+- Capture the key concepts and main points
+- Use clear, accessible language
+- Focus on the most important information
+"""
+        
+        response = client.chat.completions.create(
+            model=body.get("model", "gpt-4o"),
+            messages=[
+                {"role": "system", "content": "You are an expert at creating concise, informative summaries. Always provide exactly 3-4 sentences that capture the essence of the content."},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=body.get("temperature", 0.3),
+            max_tokens=300
+        )
+        
+        summary = response.choices[0].message.content.strip()
+        
+        return jsonify({
+            "summary": summary,
+            "success": True
+        })
+        
+    except Exception as e:
+        return jsonify({"error": f"Summary generation failed: {str(e)}"}), 500
 
 if __name__ == "__main__":
     # For local dev only

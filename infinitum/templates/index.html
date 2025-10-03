@@ -122,6 +122,19 @@
     .levels-toggle input[type="checkbox"] { margin:0; margin-right:4px; }
     .gear-icon { position:absolute; top:20px; right:20px; width:24px; height:24px; cursor:pointer; color:var(--muted); transition:color 0.2s; }
     .gear-icon:hover { color:var(--ink); }
+    .visualize-btn { font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--ring); background:#fff; cursor:pointer; color:var(--muted); margin-left:4px; }
+    .visualize-btn:hover { background:#f8f9fa; color:var(--ink); }
+    .visualize-btn:disabled { opacity:0.5; cursor:not-allowed; }
+    .modal { display:none; position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.5); }
+    .modal-content { background-color:#fff; margin:5% auto; padding:20px; border-radius:12px; width:80%; max-width:800px; max-height:80vh; overflow-y:auto; }
+    .modal-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+    .modal-title { font-size:18px; font-weight:600; color:var(--ink); }
+    .modal-close { font-size:24px; font-weight:bold; cursor:pointer; color:var(--muted); }
+    .modal-close:hover { color:var(--ink); }
+    .modal-image { width:100%; max-width:100%; height:auto; border-radius:8px; margin-bottom:15px; }
+    .modal-loading { text-align:center; padding:40px; color:var(--muted); }
+    .modal-caption { font-size:14px; color:var(--ink); text-align:center; margin-top:10px; font-style:italic; }
+    .summary-box { background:#f8f9fa; border:1px solid var(--ring); border-radius:8px; padding:12px; margin-bottom:15px; font-size:14px; line-height:1.5; color:var(--ink); }
     .settings-panel { position:absolute; top:50px; right:20px; background:#fff; border:1px solid var(--ring); border-radius:8px; padding:16px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:1000; min-width:280px; display:none; }
     .settings-panel.show { display:block; }
     .settings-group { margin-bottom:16px; }
@@ -260,6 +273,19 @@
     <button id="btnAskAboutSelection">Ask Chat</button>
   </div>
 
+  <!-- Visualization Modal -->
+  <div id="visualizationModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Visualization</div>
+        <span class="modal-close" onclick="closeVisualizationModal()">&times;</span>
+      </div>
+      <div id="modalBody">
+        <div class="modal-loading">Generating visualization...</div>
+      </div>
+    </div>
+  </div>
+
   <script>
     // ----------------------- Utilities -----------------------
     const $ = (id) => document.getElementById(id);
@@ -351,6 +377,10 @@ Requirements:
     const ACTIVE_LEVEL = new Map();   // nodeId → active level (1-10)
     const LEVEL_CONTENT = new Map();  // nodeId → Map<level, content>
     const LEVEL_READING = new Set();  // nodeId@level → in-flight read
+    const SUMMARIES = new Map();       // nodeId → summary text
+    const VISUALIZING = new Set();    // nodeId → in-flight visualization
+    const VIZ_ELIG = new Map();        // nodeId → { ok: boolean, score: number, rationale: string }
+    const VIZ_ELIG_CHECKING = new Set(); // nodeId → in-flight eligibility check
 
     // ----------------------- Notebook Schema -----------------------
     const NOTEBOOK_VERSION = "1.1.0";
@@ -404,6 +434,16 @@ Requirements:
         }
       }
 
+      const summaries = {};
+      for (const [nodeId, summary] of SUMMARIES) {
+        summaries[nodeId] = summary;
+      }
+
+      const vizElig = {};
+      for (const [nodeId, eligibility] of VIZ_ELIG) {
+        vizElig[nodeId] = eligibility;
+      }
+
       const notebook = {
         meta: {
           version: NOTEBOOK_VERSION,
@@ -432,7 +472,9 @@ Requirements:
         deepDives: DEEP_DIVES,
         levelsEnabled,
         activeLevel,
-        levelContent
+        levelContent,
+        summaries,
+        vizElig
       };
 
       return notebook;
@@ -486,6 +528,22 @@ Requirements:
             map.set(parseInt(level), content);
           }
           LEVEL_CONTENT.set(nodeId, map);
+        }
+      }
+      
+      // Restore summaries
+      SUMMARIES.clear();
+      if (notebook.summaries) {
+        for (const [nodeId, summary] of Object.entries(notebook.summaries)) {
+          SUMMARIES.set(nodeId, summary);
+        }
+      }
+      
+      // Restore visualization eligibility
+      VIZ_ELIG.clear();
+      if (notebook.vizElig) {
+        for (const [nodeId, eligibility] of Object.entries(notebook.vizElig)) {
+          VIZ_ELIG.set(nodeId, eligibility);
         }
       }
       
@@ -638,9 +696,7 @@ Requirements:
     // ----------------------- Selection & Deep Dive Functions -----------------------
     function getSelectionInfo() {
       const selection = window.getSelection();
-      console.log("getSelectionInfo - selection:", selection);
       if (!selection || selection.rangeCount === 0 || selection.toString().trim().length === 0) {
-        console.log("getSelectionInfo - no valid selection");
         return null;
       }
 
@@ -652,32 +708,42 @@ Requirements:
         return null;
       }
 
-      // Find the containing readbox and node
+      // Find the containing readbox, chat message, or node
       let container = range.commonAncestorContainer;
       while (container && container.nodeType !== Node.ELEMENT_NODE) {
         container = container.parentNode;
       }
       
       let readbox = container;
+      let chatMessage = null;
+      
+      // Look for readbox first
       while (readbox && !readbox.classList?.contains('readbox')) {
         readbox = readbox.parentNode;
       }
       
-      console.log("getSelectionInfo - readbox found:", readbox);
+      // If no readbox found, look for chat message
       if (!readbox) {
-        console.log("getSelectionInfo - no readbox found");
+        let tempContainer = container;
+        while (tempContainer && !tempContainer.classList?.contains('chat-message')) {
+          tempContainer = tempContainer.parentNode;
+        }
+        if (tempContainer) {
+          chatMessage = tempContainer;
+        }
+      }
+      
+      if (!readbox && !chatMessage) {
         return null;
       }
 
       // Find the node ID by looking for the closest node container
-      let nodeContainer = readbox;
+      let nodeContainer = readbox || chatMessage;
       while (nodeContainer && !nodeContainer.classList?.contains('node')) {
         nodeContainer = nodeContainer.parentNode;
       }
       
-      console.log("getSelectionInfo - nodeContainer found:", nodeContainer);
       if (!nodeContainer) {
-        console.log("getSelectionInfo - no nodeContainer found");
         return null;
       }
 
@@ -694,26 +760,24 @@ Requirements:
         range: range.cloneRange(),
         snippet,
         readbox,
-        nodeContainer
+        chatMessage,
+        nodeContainer,
+        isFromChat: !!chatMessage
       };
     }
 
     function findNodeIdFromContainer(container) {
-      console.log("findNodeIdFromContainer - container:", container);
       // Look for a data attribute first
       if (container.dataset?.nodeId) {
-        console.log("findNodeIdFromContainer - found nodeId in dataset:", container.dataset.nodeId);
         return container.dataset.nodeId;
       }
       
       // Fallback: look for node ID in the structure
       const idElement = container.querySelector('.id');
       if (idElement) {
-        console.log("findNodeIdFromContainer - found nodeId in .id element:", idElement.textContent.trim());
         return idElement.textContent.trim();
       }
       
-      console.log("findNodeIdFromContainer - no nodeId found");
       return null;
     }
 
@@ -784,7 +848,12 @@ Requirements:
       // Pre-fill the chat input with the selection
       const chatInput = chatContainer.querySelector('.chat-input');
       if (chatInput) {
-        chatInput.value = `Tell me more about: "${currentSelection.text}"`;
+        // If selection is from a chat message, ask for clarification
+        if (currentSelection.isFromChat) {
+          chatInput.value = `Can you elaborate on: "${currentSelection.text}"`;
+        } else {
+          chatInput.value = `Tell me more about: "${currentSelection.text}"`;
+        }
         chatInput.focus();
         
         // Trigger the send button
@@ -1103,16 +1172,34 @@ Requirements:
         renderTree(CURRENT_TOC, $("tree"));
         renderBreadcrumb();
         
-        // Scroll to Overview (first child of wrapper)
+        // Scroll to the wrapper (deep dive container) first, then to Overview
         setTimeout(() => {
-          const overviewChild = document.querySelector(`[data-node-id="${wrapper.children[0]?.id}"]`);
-          if (overviewChild) {
-            overviewChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            // Add a temporary highlight
-            overviewChild.style.backgroundColor = '#e3f2fd';
+          const wrapperElement = document.querySelector(`[data-node-id="${wrapper.id}"]`);
+          if (wrapperElement) {
+            // Scroll to the wrapper first
+            wrapperElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            
+            // Add a brief highlight effect to the wrapper
+            wrapperElement.style.transition = 'background-color 0.3s ease';
+            wrapperElement.style.backgroundColor = '#e3f2fd';
             setTimeout(() => {
-              overviewChild.style.backgroundColor = '';
+              wrapperElement.style.backgroundColor = '';
             }, 2000);
+            
+            // Then scroll to the Overview (first child) after a short delay
+            setTimeout(() => {
+              const overviewChild = document.querySelector(`[data-node-id="${wrapper.children[0]?.id}"]`);
+              if (overviewChild) {
+                overviewChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                
+                // Add highlight to the overview as well
+                overviewChild.style.transition = 'background-color 0.3s ease';
+                overviewChild.style.backgroundColor = '#f0f8ff';
+                setTimeout(() => {
+                  overviewChild.style.backgroundColor = '';
+                }, 1500);
+              }
+            }, 500);
           }
         }, 100);
 
@@ -1123,6 +1210,187 @@ Requirements:
         console.error("Deep dive failed:", e);
         showError(`Deep dive failed: ${e.message}`);
         hideSelectionToolbar();
+      }
+    }
+
+    // ----------------------- Visualization Functions -----------------------
+    async function checkVisualizationEligibility(nodeId) {
+      if (VIZ_ELIG_CHECKING.has(nodeId) || VIZ_ELIG.has(nodeId)) return;
+      
+      const node = findNodeById(CURRENT_TOC, nodeId);
+      if (!node) return;
+      
+      // Skip in mock mode
+      if (!LIVE) return;
+      
+      VIZ_ELIG_CHECKING.add(nodeId);
+      
+      try {
+        const topic = $("inpTopic").value.trim();
+        const audience = $("inpAudience").value.trim() || "general";
+        const model = $("selModel").value;
+        const temperature = parseFloat($("inpTemp").value || "0.3");
+        
+        // Get content if available
+        let content = "";
+        if (LEVELS_ENABLED.has(nodeId)) {
+          const activeLevel = ACTIVE_LEVEL.get(nodeId) || 5;
+          content = LEVEL_CONTENT.get(nodeId)?.get(activeLevel) || "";
+        } else {
+          content = CONTENT.get(nodeId) || "";
+        }
+        
+        const resp = await fetch("/api/visualize/eligibility", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic,
+            audience,
+            model,
+            temperature,
+            node: { id: node.id, title: node.title, description: node.description },
+            content
+          })
+        });
+        
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        
+        VIZ_ELIG.set(nodeId, data);
+        
+        // Re-render to show/hide the visualize button
+        renderTree(CURRENT_TOC, $("tree"));
+        
+      } catch (e) {
+        console.error("Eligibility check failed:", e);
+        // On error, assume not eligible
+        VIZ_ELIG.set(nodeId, { ok: false, score: 0, rationale: "Check failed" });
+      } finally {
+        VIZ_ELIG_CHECKING.delete(nodeId);
+      }
+    }
+
+    async function visualizeContent(nodeId) {
+      if (VISUALIZING.has(nodeId)) return;
+      
+      const node = findNodeById(CURRENT_TOC, nodeId);
+      if (!node) return;
+      
+      VISUALIZING.add(nodeId);
+      renderTree(CURRENT_TOC, $("tree"));
+      
+      try {
+        const topic = $("inpTopic").value.trim();
+        const audience = $("inpAudience").value.trim() || "general";
+        const model = $("selModel").value;
+        const temperature = parseFloat($("inpTemp").value || "0.3");
+        const path = getNodePath(nodeId);
+        
+        // Get content for visualization
+        let content = "";
+        if (LEVELS_ENABLED.has(nodeId)) {
+          const activeLevel = ACTIVE_LEVEL.get(nodeId) || 5;
+          content = LEVEL_CONTENT.get(nodeId)?.get(activeLevel) || "";
+        } else {
+          content = CONTENT.get(nodeId) || "";
+        }
+        
+        if (!content.trim()) {
+          showError("No content available to visualize. Please read the content first.");
+          return;
+        }
+        
+        // Show modal
+        showVisualizationModal(node.title);
+        
+        const resp = await fetch("/api/visualize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic,
+            audience,
+            model,
+            temperature,
+            node: { id: node.id, title: node.title, description: node.description },
+            content
+          })
+        });
+        
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        
+        console.log("Visualization response:", data);
+        
+        // Display the generated image with caption
+        displayVisualization(data.imageUrl, data.caption);
+        
+      } catch (e) {
+        console.error("Visualization failed:", e);
+        showError(`Visualization failed: ${e.message}`);
+        closeVisualizationModal();
+      } finally {
+        VISUALIZING.delete(nodeId);
+        renderTree(CURRENT_TOC, $("tree"));
+      }
+    }
+    
+    function showVisualizationModal(title) {
+      const modal = $("visualizationModal");
+      const modalBody = $("modalBody");
+      modalBody.innerHTML = '<div class="modal-loading">Generating visualization...</div>';
+      modal.style.display = "block";
+    }
+    
+    function displayVisualization(imageUrl, caption) {
+      console.log("displayVisualization called with:", { imageUrl, caption });
+      const modalBody = $("modalBody");
+      modalBody.innerHTML = `
+        <img src="${imageUrl}" alt="${caption || 'Visualization'}" class="modal-image" onerror="console.error('Image failed to load:', this.src)">
+        ${caption ? `<p class="modal-caption">${caption}</p>` : ''}
+      `;
+    }
+    
+    function closeVisualizationModal() {
+      const modal = $("visualizationModal");
+      modal.style.display = "none";
+    }
+    
+    // ----------------------- Summary Functions -----------------------
+    async function generateSummary(nodeId, content) {
+      if (SUMMARIES.has(nodeId)) {
+        return SUMMARIES.get(nodeId);
+      }
+      
+      try {
+        const topic = $("inpTopic").value.trim();
+        const audience = $("inpAudience").value.trim() || "general";
+        const model = $("selModel").value;
+        const temperature = parseFloat($("inpTemp").value || "0.3");
+        const path = getNodePath(nodeId);
+        
+        const resp = await fetch("/api/summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic,
+            audience,
+            model,
+            temperature,
+            node: { id: nodeId, title: findNodeById(CURRENT_TOC, nodeId)?.title || "" },
+            path,
+            content
+          })
+        });
+        
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        
+        SUMMARIES.set(nodeId, data.summary);
+        return data.summary;
+        
+      } catch (e) {
+        console.error("Summary generation failed:", e);
+        return "Summary generation failed. Please try again.";
       }
     }
 
@@ -1209,11 +1477,12 @@ Requirements:
         `<div class="node-title-row"><span style="font-weight:600">${node.title}</span>
            ${isDeepDiveWrapper ? '<span class="deepdive-chip" title="Created from text selection">Deep Dive</span>' : ''}
            <button class="readbtn" ${READING.has(node.id) ? "disabled": ""} data-read="${node.id}">${READING.has(node.id) ? "Reading…" : "Read"}</button>
+           ${CONTENT.has(node.id) || LEVELS_ENABLED.has(node.id) ? `
            <label class="levels-toggle ${LEVELS_ENABLED.has(node.id) ? 'active' : ''}" data-levels="${node.id}">
              <input type="checkbox" ${LEVELS_ENABLED.has(node.id) ? 'checked' : ''} style="margin-right: 4px;">
              Levels
            </label>
-           <button class="readbtn" ${FETCHING_VIDEOS.has(node.id) ? "disabled": ""} data-videos="${node.id}">${FETCHING_VIDEOS.has(node.id) ? "Fetching…" : "Suggest videos"}</button>
+           ` : ''}
          </div>` +
         (node.description ? `<div class="desc">${node.description}</div>` : "") +
         `<div class="id">${node.id}</div>`;
@@ -1223,29 +1492,39 @@ Requirements:
       wrap.appendChild(head);
 
       // READ button (independent of expand/collapse)
-      txt.querySelector('button[data-read]').addEventListener('click', async (ev) => {
+      const readBtn = txt.querySelector('button[data-read]');
+      if (readBtn) {
+        readBtn.addEventListener('click', async (ev) => {
         ev.stopPropagation();
         await readSection(node, path.concat({ id: node.id, title: node.title }));
       });
+      }
 
       // LEVELS checkbox (independent of expand/collapse)
       const levelsToggle = txt.querySelector('label[data-levels]');
-      const levelsCheckbox = levelsToggle.querySelector('input[type="checkbox"]');
-      levelsCheckbox.addEventListener('change', (ev) => {
+      if (levelsToggle) {
+        const levelsCheckbox = levelsToggle.querySelector('input[type="checkbox"]');
+        if (levelsCheckbox) {
+          levelsCheckbox.addEventListener('change', (ev) => {
         ev.stopPropagation();
-        toggleLevels(node.id);
-      });
-      // Also handle clicking the label
-      levelsToggle.addEventListener('click', (ev) => {
-        ev.stopPropagation();
-        // Don't toggle here since the checkbox change event will handle it
-      });
+            toggleLevels(node.id);
+          });
+        }
+        // Also handle clicking the label
+        levelsToggle.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          // Don't toggle here since the checkbox change event will handle it
+        });
+      }
 
-      // SUGGEST VIDEOS button (independent of expand/collapse)
-      txt.querySelector('button[data-videos]').addEventListener('click', async (ev) => {
-        ev.stopPropagation();
-        await suggestVideos(node, path.concat({ id: node.id, title: node.title }));
-      });
+      // SUGGEST VIDEOS button (hidden for now)
+      // const videosBtn = txt.querySelector('button[data-videos]');
+      // if (videosBtn) {
+      //   videosBtn.addEventListener('click', async (ev) => {
+      //     ev.stopPropagation();
+      //     await suggestVideos(node, path.concat({ id: node.id, title: node.title }));
+      //   });
+      // }
 
       // Click to toggle expand (and keep state)
       head.addEventListener("click", async () => {
@@ -1316,11 +1595,30 @@ Requirements:
         wrap.appendChild(levelContentDiv);
         
       } else if (CONTENT.has(node.id)) {
-        // Single content mode: show regular readbox
+        // Single content mode: show summary first, then full content
         const rb = document.createElement("div");
         rb.className = "readbox";
-        const markdownContent = CONTENT.get(node.id);
-        rb.innerHTML = renderMarkdown(markdownContent);
+        
+        const summary = SUMMARIES.get(node.id);
+        const fullContent = CONTENT.get(node.id);
+        
+        if (summary && fullContent) {
+          // Show summary first, then full content
+          rb.innerHTML = `
+            <div class="summary-box">
+              <strong>Summary:</strong><br>
+              ${renderMarkdown(summary)}
+            </div>
+            <div style="margin-top: 15px;">
+              <strong>Full Content:</strong><br>
+              ${renderMarkdown(fullContent)}
+            </div>
+          `;
+        } else {
+          // Fallback to just the content
+          rb.innerHTML = renderMarkdown(fullContent);
+        }
+        
         wrap.appendChild(rb);
         // Process math expressions with MathJax
         if (window.MathJax && window.MathJax.typesetPromise) {
@@ -1636,7 +1934,18 @@ Requirements:
         });
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
-        CONTENT.set(node.id, data.content || "No content returned.");
+        const fullContent = data.content || "No content returned.";
+        
+        // Generate summary first
+        const summary = await generateSummary(node.id, fullContent);
+        
+        // Store both summary and full content
+        CONTENT.set(node.id, fullContent);
+        SUMMARIES.set(node.id, summary);
+        
+        // Check visualization eligibility
+        checkVisualizationEligibility(node.id);
+        
         autosave();
       } catch (e) {
         showError(e.message || String(e));
@@ -1752,6 +2061,14 @@ Requirements:
       }
     });
     $("btnUndo").addEventListener("click", undoLastChange);
+    
+    // Enter key listener for Topic text field
+    $("inpTopic").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !$("btnGen").disabled) {
+        e.preventDefault();
+        generate();
+      }
+    });
 
     // Selection toolbar event listeners
     $("btnDiveDeep").addEventListener("click", diveDeep);
@@ -1761,7 +2078,6 @@ Requirements:
     // Selection handling
     document.addEventListener("selectionchange", () => {
       const selectionInfo = getSelectionInfo();
-      console.log("Selection change detected:", selectionInfo);
       if (selectionInfo) {
         showSelectionToolbar(selectionInfo);
       } else {
@@ -1773,7 +2089,6 @@ Requirements:
     document.addEventListener("mouseup", () => {
       setTimeout(() => {
         const selectionInfo = getSelectionInfo();
-        console.log("Mouseup selection detected:", selectionInfo);
         if (selectionInfo) {
           showSelectionToolbar(selectionInfo);
         } else {
@@ -1786,6 +2101,14 @@ Requirements:
     document.addEventListener("click", (e) => {
       if (!e.target.closest("#selectionToolbar")) {
         hideSelectionToolbar();
+      }
+    });
+
+    // Modal close on outside click
+    document.addEventListener("click", (e) => {
+      const modal = $("visualizationModal");
+      if (e.target === modal) {
+        closeVisualizationModal();
       }
     });
 
