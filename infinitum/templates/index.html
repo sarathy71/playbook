@@ -1,0 +1,1474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Topic Browser — TOC Generator</title>
+  <!-- MathJax for math rendering -->
+  <script>
+    MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+      }
+    };
+  </script>
+  <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+  <style>
+    :root { --bg:#f6f7fb; --card:#ffffff; --ink:#0f172a; --muted:#6b7280; --accent:#111827; --ring:#e5e7eb; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif; color: var(--ink); background: linear-gradient(135deg,#f8fafc,#e5e7eb); }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .row { display: grid; grid-template-columns: 1.2fr .8fr .8fr; gap: 16px; }
+    .row-1 { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .card { background: var(--card); border: 1px solid var(--ring); border-radius: 16px; padding: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.05); }
+    .title { font-weight: 800; font-size: 22px; letter-spacing: -0.2px; }
+    label { display:block; font-size:12px; color: var(--muted); margin-bottom:6px; }
+    input[type="text"], input[type="number"], input[type="password"], select { width:100%; padding:10px 12px; border:1px solid var(--ring); border-radius:12px; outline:none; }
+    input[type="range"]{ width:100%; }
+    .muted{ color: var(--muted); }
+    .btn { appearance:none; border:0; background: var(--accent); color:#fff; padding:10px 14px; border-radius: 999px; cursor:pointer; font-weight:600; }
+    .btn:disabled { opacity:.6; cursor:not-allowed; }
+    .btn-ghost { background: #fff; color: var(--ink); border:1px solid var(--ring); }
+    .toolbar { display:flex; gap:8px; align-items:center; }
+    .grid { display:grid; gap:16px; }
+    .tree { display:grid; gap:10px; }
+    .node { padding:10px 12px; border-radius:14px; border:1px solid var(--ring); background:#fff; }
+    .node-head { display:flex; gap:8px; align-items:flex-start; cursor:pointer; }
+    .node-title-row { display:flex; align-items:center; gap:8px; }
+    .chev { display:inline-block; transition: transform .2s; font-size:12px; }
+    .id { font-size:11px; color:var(--muted); }
+    .desc { font-size:13px; color:var(--muted); margin-top:4px; }
+    .children { border-left:2px solid var(--ring); margin-left:12px; padding-left:12px; display:grid; gap:8px; margin-top:8px; }
+    .pill { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--ring); border-radius:999px; padding:6px 10px; background:#fff; font-size:12px; color:var(--muted); }
+    .flex { display:flex; gap:10px; align-items:center; }
+    .space { height: 6px; }
+    .right { margin-left:auto; }
+    .danger { color:#b91c1c; }
+    .ok { color:#065f46; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .footer { color:var(--muted); font-size:12px; }
+    .readbox { margin-top:8px; background:#fafafa; border:1px solid var(--ring); border-radius:12px; padding:10px; }
+    .readbox .MathJax { font-size: 1.1em; }
+    .readbox .MathJax_Display { margin: 0.5em 0; }
+    .readbox h1, .readbox h2, .readbox h3, .readbox h4, .readbox h5, .readbox h6 { margin: 0.5em 0 0.3em 0; font-weight: 600; }
+    .readbox h1 { font-size: 1.3em; }
+    .readbox h2 { font-size: 1.2em; }
+    .readbox h3 { font-size: 1.1em; }
+    .readbox p { margin: 0.5em 0; line-height: 1.5; }
+    .readbox ul, .readbox ol { margin: 0.5em 0; padding-left: 1.5em; }
+    .readbox li { margin: 0.2em 0; }
+    .readbox code { background: #f0f0f0; padding: 0.2em 0.4em; border-radius: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.9em; }
+    .readbox pre { background: #f0f0f0; padding: 0.8em; border-radius: 6px; overflow-x: auto; margin: 0.5em 0; }
+    .readbox pre code { background: none; padding: 0; }
+    .readbox blockquote { border-left: 3px solid var(--ring); padding-left: 1em; margin: 0.5em 0; color: var(--muted); }
+    .readbox strong { font-weight: 600; }
+    .readbox em { font-style: italic; }
+    .chat-container { margin-top:12px; border:1px solid var(--ring); border-radius:12px; background:#fff; }
+    .chat-header { padding:8px 12px; background:#f8f9fa; border-bottom:1px solid var(--ring); border-radius:12px 12px 0 0; font-size:12px; font-weight:600; color:var(--muted); }
+    .chat-messages { max-height:300px; overflow-y:auto; padding:8px; }
+    .chat-message { margin-bottom:8px; padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.4; }
+    .chat-message.user { background:#e3f2fd; margin-left:20px; }
+    .chat-message.assistant { background:#f5f5f5; margin-right:20px; }
+    .chat-message h1, .chat-message h2, .chat-message h3, .chat-message h4, .chat-message h5, .chat-message h6 { margin: 0.3em 0 0.2em 0; font-weight: 600; }
+    .chat-message h1 { font-size: 1.2em; }
+    .chat-message h2 { font-size: 1.1em; }
+    .chat-message h3 { font-size: 1.05em; }
+    .chat-message p { margin: 0.3em 0; line-height: 1.4; }
+    .chat-message ul, .chat-message ol { margin: 0.3em 0; padding-left: 1.2em; }
+    .chat-message li { margin: 0.1em 0; }
+    .chat-message code { background: #e0e0e0; padding: 0.1em 0.3em; border-radius: 2px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 0.85em; }
+    .chat-message pre { background: #e0e0e0; padding: 0.5em; border-radius: 4px; overflow-x: auto; margin: 0.3em 0; }
+    .chat-message pre code { background: none; padding: 0; }
+    .chat-message blockquote { border-left: 2px solid #ccc; padding-left: 0.8em; margin: 0.3em 0; color: var(--muted); }
+    .chat-message strong { font-weight: 600; }
+    .chat-message em { font-style: italic; }
+    .chat-input-container { display:flex; gap:8px; padding:8px; border-top:1px solid var(--ring); }
+    .chat-input { flex:1; padding:8px 12px; border:1px solid var(--ring); border-radius:20px; outline:none; font-size:13px; }
+    .chat-send-btn { padding:8px 16px; background:var(--accent); color:#fff; border:none; border-radius:20px; cursor:pointer; font-size:12px; font-weight:600; }
+    .chat-send-btn:disabled { opacity:0.6; cursor:not-allowed; }
+    .video-container { margin-top:12px; border:1px solid var(--ring); border-radius:12px; background:#fff; }
+    .video-header { padding:8px 12px; background:#f8f9fa; border-bottom:1px solid var(--ring); border-radius:12px 12px 0 0; font-size:12px; font-weight:600; color:var(--muted); }
+    .video-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:12px; padding:12px; }
+    .video-thumbnail { border:1px solid var(--ring); border-radius:8px; overflow:hidden; background:#fff; transition:transform 0.2s, box-shadow 0.2s; }
+    .video-thumbnail:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,0.1); }
+    .video-thumbnail img { width:100%; height:158px; object-fit:cover; }
+    .video-info { padding:8px 12px; }
+    .video-title { font-size:13px; font-weight:600; line-height:1.3; margin-bottom:4px; color:var(--ink); display:-webkit-box; -webkit-line-clamp:2; line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .video-channel { font-size:11px; color:var(--muted); margin-bottom:2px; }
+    .video-duration { font-size:11px; color:var(--muted); }
+    .readbtn { font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid var(--ring); background:#fff; cursor:pointer; }
+    .readbtn[disabled] { opacity:.6; cursor:not-allowed; }
+    .selection-toolbar { position:fixed; z-index:1000; background:var(--card); border:1px solid var(--ring); border-radius:12px; padding:8px; box-shadow:0 8px 32px rgba(0,0,0,0.12); display:none; gap:8px; align-items:center; pointer-events:auto; }
+    .selection-toolbar button { font-size:12px; padding:6px 12px; border-radius:8px; border:1px solid var(--ring); background:#fff; cursor:pointer; font-weight:500; }
+    .selection-toolbar button:hover { background:#f8f9fa; }
+    .selection-toolbar button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .selection-toolbar button.primary:hover { background:#0f1419; }
+    .deepdive-chip { display:inline-flex; align-items:center; gap:4px; background:#e3f2fd; color:#1565c0; font-size:10px; padding:2px 6px; border-radius:4px; margin-left:8px; }
+    .deepdive-chip:hover { background:#bbdefb; }
+    .undo-btn { font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--ring); background:#fff; cursor:pointer; color:var(--muted); }
+    .undo-btn:hover { background:#f8f9fa; color:var(--ink); }
+    .undo-btn:disabled { opacity:0.5; cursor:not-allowed; }
+    @media (max-width: 980px) { .row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="toolbar" style="justify-content:space-between; margin-bottom: 12px;">
+      <div class="title">Topic Browser — TOC Generator</div>
+      <div class="flex">
+        <span class="pill">Status: <span id="statusText">Mock</span></span>
+        <button id="btnGen" class="btn">Generate TOC</button>
+      </div>
+    </div>
+
+    <!-- Inputs -->
+    <div class="row">
+      <div class="card grid">
+        <div>
+          <label>Topic</label>
+          <input id="inpTopic" type="text" placeholder="e.g., Neural Networks, Ramayana, Corporate Finance" />
+        </div>
+        <div class="row-1">
+          <div class="grid" style="grid-template-columns: 1fr 1fr;">
+            <div>
+              <label>Audience</label>
+              <input id="inpAudience" type="text" value="general" />
+            </div>
+            <div>
+              <label>Depth (levels)</label>
+              <input id="inpDepth" type="number" min="1" max="6" value="3" />
+            </div>
+            <div>
+              <label>Approx sections/level</label>
+              <input id="inpSections" type="number" min="2" max="12" value="5" />
+            </div>
+            <div>
+              <label>Model</label>
+              <select id="selModel">
+                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                <option value="gpt-4.1">gpt-4.1</option>
+                <option value="gpt-5-mini">gpt-5-mini</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label>Temperature (<span id="tempVal">0.30</span>)</label>
+            <input id="inpTemp" type="range" min="0" max="1" step="0.05" value="0.3" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card grid">
+        <div class="flex">
+          <button id="btnUseMock" class="btn-ghost">Use Mock</button>
+          <button id="btnUseLive" class="btn">Use Live</button>
+        </div>
+        <div class="space"></div>
+        <div class="footer">
+          Server handles API calls securely. Use Mock mode for testing UI without backend.
+        </div>
+      </div>
+
+      <div class="card grid">
+        <div class="toolbar">
+          <button id="btnSaveNotebook" class="btn-ghost">Save Notebook</button>
+          <button id="btnOpenNotebook" class="btn-ghost">Open Notebook</button>
+          <button id="btnCopyJSON" class="btn-ghost">Copy JSON</button>
+          <button id="btnExportJSON" class="btn-ghost">Export JSON</button>
+          <button id="btnExportMD" class="btn-ghost">Export Markdown</button>
+          <button id="btnUndo" class="undo-btn" disabled>Undo</button>
+          <span class="right pill">Runs: <span id="runCount">0</span></span>
+        </div>
+        <div id="errorBox" class="muted danger"></div>
+      </div>
+    </div>
+
+    <div class="space"></div>
+
+    <!-- Result -->
+    <div class="card">
+      <div class="toolbar" style="justify-content:space-between;">
+        <div>
+          <div class="muted">Result</div>
+          <div id="resultTitle" style="font-weight:700; font-size:18px;">No topic yet</div>
+        </div>
+        <div class="muted">Top-level sections: <span id="topCount">0</span></div>
+      </div>
+
+      <!-- Breadcrumb -->
+      <div id="breadcrumb" class="muted mono" style="margin-top:6px; overflow:auto; white-space:nowrap;"></div>
+
+      <div id="tree" class="tree" style="margin-top:10px;"></div>
+    </div>
+
+    <div class="space"></div>
+
+    <div class="footer">Tip: Click a section, Read button, or Suggest videos button. Expansions call the LLM again with your current settings and keep ancestors expanded. After reading content, use the chat feature to ask questions about specific items. Select text in read content and use Ctrl+D to dive deeper.</div>
+  </div>
+
+  <!-- Selection Toolbar -->
+  <div id="selectionToolbar" class="selection-toolbar">
+    <button id="btnDiveDeep" class="primary">Dive Deep</button>
+    <button id="btnCopySelection">Copy</button>
+    <button id="btnAskAboutSelection">Ask Chat</button>
+  </div>
+
+  <script>
+    // ----------------------- Utilities -----------------------
+    const $ = (id) => document.getElementById(id);
+    const slug = (s) => (s||"")
+      .toLowerCase().trim()
+      .replace(/[^a-z0-9\s/\-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-");
+    const blobDownload = (filename, text, type="application/json") => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], { type }));
+      a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    };
+
+    // Configure marked for Markdown rendering
+    if (typeof marked !== 'undefined') {
+      marked.setOptions({
+        breaks: true,
+        gfm: true,
+        sanitize: false, // We trust our content
+        smartLists: true,
+        smartypants: true
+      });
+    }
+
+    function renderMarkdown(markdownText) {
+      if (typeof marked === 'undefined') {
+        // Fallback if marked.js isn't loaded
+        return markdownText.replace(/\n/g, '<br>');
+      }
+      return marked.parse(markdownText);
+    }
+
+    const SYSTEM_PROMPT =
+      "You are an expert curriculum designer and information architect. Given a Topic and constraints, produce a clean, hierarchical table of contents. Focus on clarity, progressive depth, and coverage of the domain. Avoid fluff, keep titles concise, and add 1-sentence descriptions only when valuable.";
+
+    const promptTemplate = ({ topic, audience, depth, sections }) => `
+Topic: ${topic}
+Audience: ${audience || 'general'}
+Desired depth/levels: ${depth ?? 3}
+Target sections per level (approx): ${sections ?? 5}
+
+Requirements:
+- Return ONLY valid JSON matching the schema { toc: TocNode[] }.
+- Each TocNode: { id: string (slug), title: string, description?: string, children?: TocNode[] }
+- IDs must be unique, URL-safe slugs derived from titles (e.g., "neural-networks/activation-functions").
+- The tree should be reasonably balanced and non-redundant.
+- Include foundational -> intermediate -> advanced progression.
+- Prefer 3–7 top-level sections unless topic is very narrow.
+`;
+
+    const example = { toc: [
+      { id: "intro", title: "Introduction", description: "What this topic covers and how to navigate the material.", children:[
+        { id: "basics/what-why", title: "What & Why" },
+        { id: "basics/terminology", title: "Key Terminology" }
+      ]},
+      { id: "foundations", title: "Foundations", children:[
+        { id: "foundations/concepts", title: "Core Concepts" },
+        { id: "foundations/math", title: "Math & Intuition" },
+        { id: "foundations/tools", title: "Tooling & Setup" }
+      ]},
+      { id: "intermediate", title: "Intermediate", children:[
+        { id: "intermediate/patterns", title: "Common Patterns" },
+        { id: "intermediate/pitfalls", title: "Pitfalls & Anti-Patterns" }
+      ]},
+      { id: "advanced", title: "Advanced", children:[
+        { id: "advanced/state-of-the-art", title: "State of the Art" },
+        { id: "advanced/research-frontiers", title: "Research Frontiers" }
+      ]}
+    ]};
+
+    // ----------------------- State -----------------------
+    let RUNS = 0;
+    let LIVE = true;  // server-backed by default
+    let CURRENT_TOC = [];
+    let BREAD = [];                 // [{id,title}, ...]
+    const EXP_CACHE = new Map();    // nodeId -> children[]
+    const EXPANDED = new Set();     // nodeId -> expanded?
+    const CONTENT = new Map();      // nodeId -> explanation text
+    const READING = new Set();      // nodeId -> in-flight read
+    const CHAT_HISTORY = new Map(); // nodeId -> [{role: 'user'|'assistant', content: string, ts: string}]
+    const CHATTING = new Set();     // nodeId -> in-flight chat
+    const VIDEOS = new Map();       // nodeId -> [{title, channel, duration, thumbnail, url}]
+    const FETCHING_VIDEOS = new Set(); // nodeId -> in-flight video fetch
+    const RUNS_HISTORY = [];        // [{ts, model, temperature, tokens, requestSummary}]
+    const DEEP_DIVES = [];          // [{nodeId, selection: {text, snippet, offsets}, createdAt, newChildIds}]
+    const UNDO_STACK = [];          // [{type, parentId, childrenIds, timestamp}]
+
+    // ----------------------- Notebook Schema -----------------------
+    const NOTEBOOK_VERSION = "1.0.0";
+    const AUTOSAVE_KEY = "topic_browser_autosave";
+    const AUTOSAVE_DEBOUNCE_MS = 2000;
+    let autosaveTimeout = null;
+    let currentSelection = null;    // {text, nodeId, range, snippet}
+
+    // ----------------------- Notebook Functions -----------------------
+    function serializeNotebook() {
+      const now = new Date().toISOString();
+      const topic = $("inpTopic").value.trim();
+      const audience = $("inpAudience").value.trim() || "general";
+      const depth = parseInt($("inpDepth").value || "3", 10);
+      const sections = parseInt($("inpSections").value || "5", 10);
+      const model = $("selModel").value;
+      const temperature = parseFloat($("inpTemp").value || "0.3");
+
+      // Convert Maps and Sets to plain objects/arrays for JSON serialization
+      const expansions = {};
+      for (const [nodeId, children] of EXP_CACHE) {
+        expansions[nodeId] = children;
+      }
+
+      const content = {};
+      for (const [nodeId, text] of CONTENT) {
+        content[nodeId] = text;
+      }
+
+      const chat = {};
+      for (const [nodeId, messages] of CHAT_HISTORY) {
+        chat[nodeId] = messages;
+      }
+
+      const videos = {};
+      for (const [nodeId, videoList] of VIDEOS) {
+        videos[nodeId] = videoList;
+      }
+
+      const notebook = {
+        meta: {
+          version: NOTEBOOK_VERSION,
+          createdAt: now,
+          updatedAt: now,
+          appVersion: "1.0.0",
+          platform: navigator.userAgent,
+          topic: topic
+        },
+        config: {
+          topic,
+          audience,
+          depth,
+          sections,
+          model,
+          temperature
+        },
+        toc: CURRENT_TOC,
+        expanded: Array.from(EXPANDED),
+        bread: BREAD,
+        expansions,
+        content,
+        chat,
+        videos,
+        runs: RUNS_HISTORY,
+        deepDives: DEEP_DIVES
+      };
+
+      return notebook;
+    }
+
+    function deserializeNotebook(notebook) {
+      // Validate version and migrate if needed
+      const version = notebook.meta?.version || "0.0.0";
+      if (version !== NOTEBOOK_VERSION) {
+        console.warn(`Notebook version ${version} differs from current ${NOTEBOOK_VERSION}`);
+        // Future: add migration logic here
+      }
+
+      // Apply config to UI
+      if (notebook.config) {
+        $("inpTopic").value = notebook.config.topic || "";
+        $("inpAudience").value = notebook.config.audience || "general";
+        $("inpDepth").value = notebook.config.depth || 3;
+        $("inpSections").value = notebook.config.sections || 5;
+        $("selModel").value = notebook.config.model || "gpt-4.1-mini";
+        $("inpTemp").value = notebook.config.temperature || 0.3;
+        $("tempVal").textContent = Number(notebook.config.temperature || 0.3).toFixed(2);
+      }
+
+      // Restore state
+      CURRENT_TOC = notebook.toc || [];
+      BREAD = notebook.bread || [];
+      RUNS_HISTORY.splice(0, RUNS_HISTORY.length, ...(notebook.runs || []));
+      DEEP_DIVES.splice(0, DEEP_DIVES.length, ...(notebook.deepDives || []));
+
+      // Clear and restore Maps
+      EXP_CACHE.clear();
+      if (notebook.expansions) {
+        for (const [nodeId, children] of Object.entries(notebook.expansions)) {
+          EXP_CACHE.set(nodeId, children);
+        }
+      }
+
+      CONTENT.clear();
+      if (notebook.content) {
+        for (const [nodeId, text] of Object.entries(notebook.content)) {
+          CONTENT.set(nodeId, text);
+        }
+      }
+
+      CHAT_HISTORY.clear();
+      if (notebook.chat) {
+        for (const [nodeId, messages] of Object.entries(notebook.chat)) {
+          CHAT_HISTORY.set(nodeId, messages);
+        }
+      }
+
+      VIDEOS.clear();
+      if (notebook.videos) {
+        for (const [nodeId, videoList] of Object.entries(notebook.videos)) {
+          VIDEOS.set(nodeId, videoList);
+        }
+      }
+
+      // Restore expanded state
+      EXPANDED.clear();
+      if (notebook.expanded) {
+        for (const nodeId of notebook.expanded) {
+          EXPANDED.add(nodeId);
+        }
+      }
+
+      // Update UI counters
+      $("topCount").textContent = CURRENT_TOC.length;
+      $("runCount").textContent = RUNS_HISTORY.length;
+      $("resultTitle").textContent = notebook.config?.topic ? `TOC for: ${notebook.config.topic}` : "No topic yet";
+
+      // Re-render everything
+      renderTree(CURRENT_TOC, $("tree"));
+      renderBreadcrumb();
+
+      // Re-typeset MathJax after a short delay to ensure DOM is ready
+      setTimeout(() => {
+        if (window.MathJax?.typesetPromise) {
+          window.MathJax.typesetPromise().catch(() => {});
+        }
+      }, 200);
+    }
+
+    function saveNotebook() {
+      try {
+        const notebook = serializeNotebook();
+        const topic = notebook.config.topic || "topic";
+        const filename = `notebook-${slug(topic)}-${new Date().toISOString().slice(0, 10)}.tbnb`;
+        const jsonStr = JSON.stringify(notebook, null, 2);
+        blobDownload(filename, jsonStr, "application/json");
+      } catch (e) {
+        console.error("Failed to save notebook:", e);
+        $("errorBox").textContent = `Failed to save notebook: ${e.message}`;
+      }
+    }
+
+    function openNotebook() {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = ".tbnb,.json";
+      input.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const notebook = JSON.parse(e.target.result);
+            deserializeNotebook(notebook);
+            $("errorBox").textContent = "";
+          } catch (err) {
+            console.error("Failed to load notebook:", err);
+            $("errorBox").textContent = `Failed to load notebook: ${err.message}`;
+          }
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+    }
+
+    function autosave() {
+      if (autosaveTimeout) {
+        clearTimeout(autosaveTimeout);
+      }
+      autosaveTimeout = setTimeout(() => {
+        try {
+          const notebook = serializeNotebook();
+          localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(notebook));
+        } catch (e) {
+          console.warn("Autosave failed:", e);
+        }
+      }, AUTOSAVE_DEBOUNCE_MS);
+    }
+
+    function loadAutosave() {
+      try {
+        const saved = localStorage.getItem(AUTOSAVE_KEY);
+        if (saved) {
+          const notebook = JSON.parse(saved);
+          const savedTime = new Date(notebook.meta?.updatedAt || 0);
+          const now = new Date();
+          const hoursAgo = (now - savedTime) / (1000 * 60 * 60);
+          
+          if (hoursAgo < 24) { // Only offer autosave if less than 24 hours old
+            const resume = confirm(
+              `Found a saved session from ${savedTime.toLocaleString()}.\n\n` +
+              `Do you want to resume where you left off?`
+            );
+            if (resume) {
+              deserializeNotebook(notebook);
+              return true;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to load autosave:", e);
+      }
+      return false;
+    }
+
+    // ----------------------- Selection & Deep Dive Functions -----------------------
+    function getSelectionInfo() {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0 || selection.toString().trim().length === 0) {
+        return null;
+      }
+
+      const range = selection.getRangeAt(0);
+      const text = selection.toString().trim();
+      
+      // Validate selection length
+      if (text.length < 8 || text.length > 3000) {
+        return null;
+      }
+
+      // Find the containing readbox and node
+      let container = range.commonAncestorContainer;
+      while (container && container.nodeType !== Node.ELEMENT_NODE) {
+        container = container.parentNode;
+      }
+      
+      let readbox = container;
+      while (readbox && !readbox.classList?.contains('readbox')) {
+        readbox = readbox.parentNode;
+      }
+      
+      if (!readbox) return null;
+
+      // Find the node ID by looking for the closest node container
+      let nodeContainer = readbox;
+      while (nodeContainer && !nodeContainer.classList?.contains('node')) {
+        nodeContainer = nodeContainer.parentNode;
+      }
+      
+      if (!nodeContainer) return null;
+
+      // Extract node ID from the node container (look for data attribute or parse from structure)
+      const nodeId = findNodeIdFromContainer(nodeContainer);
+      if (!nodeId) return null;
+
+      // Create snippet for anchor
+      const snippet = text.length > 50 ? text.substring(0, 50) + '...' : text;
+
+      return {
+        text,
+        nodeId,
+        range: range.cloneRange(),
+        snippet,
+        readbox,
+        nodeContainer
+      };
+    }
+
+    function findNodeIdFromContainer(container) {
+      // Look for a data attribute first
+      if (container.dataset?.nodeId) {
+        return container.dataset.nodeId;
+      }
+      
+      // Fallback: look for node ID in the structure
+      const idElement = container.querySelector('.id');
+      if (idElement) {
+        return idElement.textContent.trim();
+      }
+      
+      return null;
+    }
+
+    function showSelectionToolbar(selectionInfo) {
+      const toolbar = $("selectionToolbar");
+      const rect = selectionInfo.range.getBoundingClientRect();
+      
+      // Get viewport dimensions
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const toolbarWidth = 200; // Approximate toolbar width
+      const toolbarHeight = 40; // Approximate toolbar height
+      
+      // Calculate position relative to viewport
+      let left = rect.left + rect.width / 2 - toolbarWidth / 2;
+      let top = rect.top - toolbarHeight - 10; // 10px gap above selection
+      
+      // Ensure toolbar stays within viewport bounds
+      if (left < 10) left = 10;
+      if (left + toolbarWidth > viewportWidth - 10) {
+        left = viewportWidth - toolbarWidth - 10;
+      }
+      
+      // If selection is too high, show toolbar below
+      if (top < 10) {
+        top = rect.bottom + 10; // 10px gap below selection
+      }
+      
+      // Ensure toolbar doesn't go below viewport
+      if (top + toolbarHeight > viewportHeight - 10) {
+        top = viewportHeight - toolbarHeight - 10;
+      }
+      
+      // Apply positioning
+      toolbar.style.position = 'fixed';
+      toolbar.style.left = `${left}px`;
+      toolbar.style.top = `${top}px`;
+      toolbar.style.display = 'flex';
+      
+      currentSelection = selectionInfo;
+    }
+
+    function hideSelectionToolbar() {
+      const toolbar = $("selectionToolbar");
+      toolbar.style.display = 'none';
+      currentSelection = null;
+    }
+
+    function copySelection() {
+      if (currentSelection) {
+        navigator.clipboard.writeText(currentSelection.text);
+        hideSelectionToolbar();
+      }
+    }
+
+    function askAboutSelection() {
+      if (!currentSelection) return;
+      
+      const nodeId = currentSelection.nodeId;
+      const node = findNodeById(CURRENT_TOC, nodeId);
+      if (!node) return;
+
+      // Find the chat container for this node
+      const nodeContainer = currentSelection.nodeContainer;
+      const chatContainer = nodeContainer.querySelector('.chat-container');
+      if (!chatContainer) return;
+
+      // Pre-fill the chat input with the selection
+      const chatInput = chatContainer.querySelector('.chat-input');
+      if (chatInput) {
+        chatInput.value = `Tell me more about: "${currentSelection.text}"`;
+        chatInput.focus();
+        
+        // Trigger the send button
+        const chatSendBtn = chatContainer.querySelector('.chat-send-btn');
+        if (chatSendBtn && !chatSendBtn.disabled) {
+          chatSendBtn.click();
+        }
+      }
+      
+      hideSelectionToolbar();
+    }
+
+    function findNodeById(nodes, targetId) {
+      for (const node of nodes) {
+        if (node.id === targetId) return node;
+        if (node.children) {
+          const found = findNodeById(node.children, targetId);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+
+    function getNodePath(nodeId) {
+      const path = [];
+      function findPath(nodes, targetId, currentPath = []) {
+        for (const node of nodes) {
+          const newPath = [...currentPath, { id: node.id, title: node.title }];
+          if (node.id === targetId) {
+            path.push(...newPath);
+            return true;
+          }
+          if (node.children && findPath(node.children, targetId, newPath)) {
+            return true;
+          }
+        }
+        return false;
+      }
+      findPath(CURRENT_TOC, nodeId);
+      return path;
+    }
+
+    async function diveDeep() {
+      if (!currentSelection) return;
+      
+      const selectionInfo = currentSelection;
+      const nodeId = selectionInfo.nodeId;
+      const node = findNodeById(CURRENT_TOC, nodeId);
+      if (!node) return;
+
+      // Show confirmation modal
+      const confirmed = confirm(
+        `Dive deeper into:\n\n"${selectionInfo.snippet}"\n\nThis will create new child sections based on the selected text. Continue?`
+      );
+      
+      if (!confirmed) {
+        hideSelectionToolbar();
+        return;
+      }
+
+      try {
+        const topic = $("inpTopic").value.trim();
+        const audience = $("inpAudience").value.trim() || "general";
+        const model = $("selModel").value;
+        const temperature = parseFloat($("inpTemp").value || "0.3");
+        const path = getNodePath(nodeId);
+
+        const resp = await fetch("/api/deepdive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic,
+            audience,
+            model,
+            temperature,
+            node: { id: node.id, title: node.title },
+            path,
+            selection: {
+              text: selectionInfo.text,
+              sourceNodeId: nodeId,
+              snippet: selectionInfo.snippet
+            }
+          })
+        });
+
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        const shortName = data.shortName;
+        const wrapperDescription = data.wrapperDescription;
+        const children = data.children || [];
+
+        if (children.length === 0) {
+          alert("Couldn't identify subtopics from the selection. Try selecting a more specific concept or phrase.");
+          hideSelectionToolbar();
+          return;
+        }
+
+        // Create wrapper node
+        const wrapperId = `${nodeId}/${slug(shortName)}`;
+        const wrapper = {
+          id: wrapperId,
+          title: shortName,
+          description: wrapperDescription,
+          children: children.map((child, index) => ({
+            id: `${wrapperId}/${slug(child.title || `child-${index}`)}`,
+            title: child.title,
+            description: child.description,
+            readContent: child.readContent
+          }))
+        };
+
+        // Ensure unique wrapper ID
+        let finalWrapperId = wrapperId;
+        let counter = 2;
+        while (node.children?.some(child => child.id === finalWrapperId)) {
+          finalWrapperId = `${nodeId}/${slug(shortName)}-${counter}`;
+          counter++;
+        }
+        wrapper.id = finalWrapperId;
+        wrapper.children = wrapper.children.map(child => ({
+          ...child,
+          id: child.id.replace(wrapperId, finalWrapperId)
+        }));
+
+        // Create undo snapshot
+        const undoSnapshot = {
+          type: 'add-children',
+          parentId: nodeId,
+          childrenIds: [wrapper.id, ...wrapper.children.map(c => c.id)],
+          timestamp: new Date().toISOString()
+        };
+        UNDO_STACK.push(undoSnapshot);
+        updateUndoButton();
+
+        // Add wrapper to the node
+        if (!node.children) node.children = [];
+        node.children.push(wrapper);
+
+        // Update expansion cache
+        EXP_CACHE.set(nodeId, node.children);
+        EXP_CACHE.set(wrapper.id, wrapper.children);
+
+        // Add to expanded set: parent, wrapper, and first child only
+        EXPANDED.add(nodeId);
+        EXPANDED.add(wrapper.id);
+        if (wrapper.children.length > 0) {
+          EXPANDED.add(wrapper.children[0].id);
+        }
+
+        // Set content only for the first child (Overview)
+        if (wrapper.children.length > 0 && wrapper.children[0].readContent) {
+          CONTENT.set(wrapper.children[0].id, wrapper.children[0].readContent);
+          
+          // Initialize chat history for Overview with system message
+          const overviewId = wrapper.children[0].id;
+          if (!CHAT_HISTORY.has(overviewId)) {
+            CHAT_HISTORY.set(overviewId, []);
+          }
+          CHAT_HISTORY.get(overviewId).push({
+            role: 'system',
+            content: `Overview created from selection: "${selectionInfo.snippet}"`,
+            ts: new Date().toISOString()
+          });
+        }
+
+        // Track deep dive event
+        DEEP_DIVES.push({
+          nodeId,
+          wrapperId: wrapper.id,
+          shortName,
+          overviewChildId: wrapper.children[0]?.id,
+          selection: {
+            text: selectionInfo.text,
+            snippet: selectionInfo.snippet
+          },
+          createdAt: new Date().toISOString(),
+          newChildIds: [wrapper.id, ...wrapper.children.map(c => c.id)]
+        });
+
+        // Re-render and scroll to Overview
+        renderTree(CURRENT_TOC, $("tree"));
+        renderBreadcrumb();
+        
+        // Scroll to Overview (first child of wrapper)
+        setTimeout(() => {
+          const overviewChild = document.querySelector(`[data-node-id="${wrapper.children[0]?.id}"]`);
+          if (overviewChild) {
+            overviewChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Add a temporary highlight
+            overviewChild.style.backgroundColor = '#e3f2fd';
+            setTimeout(() => {
+              overviewChild.style.backgroundColor = '';
+            }, 2000);
+          }
+        }, 100);
+
+        autosave();
+        hideSelectionToolbar();
+
+      } catch (e) {
+        console.error("Deep dive failed:", e);
+        $("errorBox").textContent = `Deep dive failed: ${e.message}`;
+        hideSelectionToolbar();
+      }
+    }
+
+    function undoLastChange() {
+      if (UNDO_STACK.length === 0) return;
+      
+      const lastChange = UNDO_STACK.pop();
+      
+      if (lastChange.type === 'add-children') {
+        const node = findNodeById(CURRENT_TOC, lastChange.parentId);
+        if (node && node.children) {
+          // Remove the children that were added (including wrapper and its children)
+          node.children = node.children.filter(child => 
+            !lastChange.childrenIds.includes(child.id)
+          );
+          
+          // Update expansion cache
+          if (node.children.length === 0) {
+            EXP_CACHE.delete(lastChange.parentId);
+          } else {
+            EXP_CACHE.set(lastChange.parentId, node.children);
+          }
+          
+          // Remove from expanded set and clean up all related state
+          lastChange.childrenIds.forEach(childId => {
+            EXPANDED.delete(childId);
+            CONTENT.delete(childId);
+            CHAT_HISTORY.delete(childId);
+            VIDEOS.delete(childId);
+            EXP_CACHE.delete(childId); // Also remove wrapper's expansion cache
+          });
+          
+          // Remove from deep dives tracking
+          DEEP_DIVES.splice(DEEP_DIVES.findIndex(dd => 
+            dd.newChildIds.some(id => lastChange.childrenIds.includes(id))
+          ), 1);
+          
+          // Re-render
+          renderTree(CURRENT_TOC, $("tree"));
+          renderBreadcrumb();
+          autosave();
+        }
+      }
+      
+      updateUndoButton();
+    }
+
+    function updateUndoButton() {
+      const undoBtn = $("btnUndo");
+      undoBtn.disabled = UNDO_STACK.length === 0;
+    }
+
+    // ----------------------- Rendering -----------------------
+    function renderTree(nodes, container) {
+      container.innerHTML = "";
+      if (!nodes || !Array.isArray(nodes) || nodes.length === 0) {
+        container.innerHTML = '<div class="muted">No sections yet. Generate a TOC to see results.</div>';
+        return;
+      }
+      nodes.forEach((node) => container.appendChild(renderNode(node, 0, [])));
+    }
+
+    function renderNode(node, depth, path) {
+      const hasChildren = Array.isArray(node.children) && node.children.length > 0;
+      const wrap = document.createElement("div");
+      wrap.className = "node";
+      wrap.dataset.nodeId = node.id;
+
+      const head = document.createElement("div");
+      head.className = "node-head";
+
+      const chev = document.createElement("span");
+      chev.className = "chev";
+      const isOpen = EXPANDED.has(node.id) || (depth === 0 && EXPANDED.size === 0); // auto-open top-level on first render
+      if (isOpen) EXPANDED.add(node.id);
+      chev.textContent = hasChildren ? "▶" : "●";
+      chev.style.transform = hasChildren && isOpen ? "rotate(90deg)" : "rotate(0deg)";
+
+      // Check if this is a deep dive wrapper
+      const isDeepDiveWrapper = DEEP_DIVES.some(dd => dd.wrapperId === node.id);
+      
+      const txt = document.createElement("div");
+      txt.innerHTML =
+        `<div class="node-title-row"><span style="font-weight:600">${node.title}</span>
+           ${isDeepDiveWrapper ? '<span class="deepdive-chip" title="Created from text selection">Deep Dive</span>' : ''}
+           <button class="readbtn" ${READING.has(node.id) ? "disabled": ""} data-read="${node.id}">${READING.has(node.id) ? "Reading…" : "Read"}</button>
+           <button class="readbtn" ${FETCHING_VIDEOS.has(node.id) ? "disabled": ""} data-videos="${node.id}">${FETCHING_VIDEOS.has(node.id) ? "Fetching…" : "Suggest videos"}</button>
+         </div>` +
+        (node.description ? `<div class="desc">${node.description}</div>` : "") +
+        `<div class="id">${node.id}</div>`;
+
+      head.appendChild(chev);
+      head.appendChild(txt);
+      wrap.appendChild(head);
+
+      // READ button (independent of expand/collapse)
+      txt.querySelector('button[data-read]').addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        await readSection(node, path.concat({ id: node.id, title: node.title }));
+      });
+
+      // SUGGEST VIDEOS button (independent of expand/collapse)
+      txt.querySelector('button[data-videos]').addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        await suggestVideos(node, path.concat({ id: node.id, title: node.title }));
+      });
+
+      // Click to toggle expand (and keep state)
+      head.addEventListener("click", async () => {
+        if (!hasChildren && !EXP_CACHE.has(node.id)) {
+          // No children yet—treat as an expand intent: fetch children
+          const newPath = path.concat({ id: node.id, title: node.title });
+          for (const p of newPath) EXPANDED.add(p.id); // keep all ancestors open
+          await handleNodeClick(node, newPath);
+          return; // re-render will show children
+        }
+        if (hasChildren || EXP_CACHE.has(node.id)) {
+          if (EXPANDED.has(node.id)) EXPANDED.delete(node.id); else EXPANDED.add(node.id);
+          renderTree(CURRENT_TOC, $("tree"));
+        }
+      });
+
+      // Children container
+      if (hasChildren && isOpen) {
+        const childrenDiv = document.createElement("div");
+        childrenDiv.className = "children";
+        node.children.forEach((c) =>
+          childrenDiv.appendChild(
+            renderNode(c, depth + 1, path.concat({ id: node.id, title: node.title }))
+          )
+        );
+        wrap.appendChild(childrenDiv);
+      }
+
+      // Explanation content (if any)
+      if (CONTENT.has(node.id)) {
+        const rb = document.createElement("div");
+        rb.className = "readbox";
+        const markdownContent = CONTENT.get(node.id);
+        rb.innerHTML = renderMarkdown(markdownContent);
+        wrap.appendChild(rb);
+        // Process math expressions with MathJax
+        if (window.MathJax && window.MathJax.typesetPromise) {
+          window.MathJax.typesetPromise([rb]).catch((err) => console.log('MathJax typeset error:', err));
+        }
+
+        // Add chat interface
+        const chatContainer = document.createElement("div");
+        chatContainer.className = "chat-container";
+        chatContainer.innerHTML = `
+          <div class="chat-header">Ask questions about "${node.title}"</div>
+          <div class="chat-messages" id="chat-messages-${node.id}"></div>
+          <div class="chat-input-container">
+            <input type="text" class="chat-input" id="chat-input-${node.id}" placeholder="Ask a question..." />
+            <button class="chat-send-btn" id="chat-send-${node.id}" ${CHATTING.has(node.id) ? "disabled" : ""}>${CHATTING.has(node.id) ? "..." : "Send"}</button>
+          </div>
+        `;
+        wrap.appendChild(chatContainer);
+
+        // Initialize chat messages if history exists
+        const messagesContainer = chatContainer.querySelector('.chat-messages');
+        const chatHistory = CHAT_HISTORY.get(node.id) || [];
+        chatHistory.forEach(msg => {
+          const msgDiv = document.createElement("div");
+          msgDiv.className = `chat-message ${msg.role}`;
+          if (msg.role === 'assistant') {
+            msgDiv.innerHTML = renderMarkdown(msg.content);
+          } else {
+            msgDiv.textContent = msg.content;
+          }
+          messagesContainer.appendChild(msgDiv);
+        });
+        if (chatHistory.length > 0) {
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Add chat event listeners
+        const chatInput = chatContainer.querySelector('.chat-input');
+        const chatSendBtn = chatContainer.querySelector('.chat-send-btn');
+
+        const sendMessage = async () => {
+          const question = chatInput.value.trim();
+          if (!question || CHATTING.has(node.id)) return;
+
+          await handleChatMessage(node, path, question, chatContainer);
+        };
+
+        chatSendBtn.addEventListener('click', sendMessage);
+        chatInput.addEventListener('keypress', (e) => {
+          if (e.key === 'Enter') sendMessage();
+        });
+
+        // Add video suggestions if they exist
+        if (VIDEOS.has(node.id)) {
+          const videoContainer = document.createElement("div");
+          videoContainer.className = "video-container";
+          videoContainer.innerHTML = `
+            <div class="video-header">Suggested videos for "${node.title}" ${!LIVE ? "(Demo videos - click to see real YouTube content)" : ""}</div>
+            <div class="video-grid" id="video-grid-${node.id}"></div>
+          `;
+          wrap.appendChild(videoContainer);
+
+          const videoGrid = videoContainer.querySelector('.video-grid');
+          const videos = VIDEOS.get(node.id);
+          videos.forEach(video => {
+            const videoDiv = document.createElement("div");
+            videoDiv.className = "video-thumbnail";
+            videoDiv.innerHTML = `
+              <img src="${video.thumbnail}" alt="${video.title}" loading="lazy" onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjgwIiBoZWlnaHQ9IjE1OCIgdmlld0JveD0iMCAwIDI4MCAxNTgiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIyODAiIGhlaWdodD0iMTU4IiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik0xMjAgNjBMMTYwIDEwMEwxMjAgMTQwTDgwIDEwMEwxMjAgNjBaIiBmaWxsPSIjQ0NDQ0NDIi8+Cjx0ZXh0IHg9IjE0MCIgeT0iMTMwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5OTk5OTkiPk5vIFRodW1ibmFpbDwvdGV4dD4KPC9zdmc+'" />
+              <div class="video-info">
+                <div class="video-title">${video.title}</div>
+                <div class="video-channel">${video.channel}</div>
+                <div class="video-duration">${video.duration}</div>
+              </div>
+            `;
+            videoDiv.addEventListener('click', () => {
+              window.open(video.url, '_blank');
+            });
+            videoGrid.appendChild(videoDiv);
+          });
+        }
+      }
+
+      return wrap;
+    }
+
+    // ----------------------- Chat Functionality -----------------------
+    async function handleChatMessage(node, path, question, chatContainer) {
+      if (CHATTING.has(node.id)) return;
+      CHATTING.add(node.id);
+
+      const chatInput = chatContainer.querySelector('.chat-input');
+      const chatSendBtn = chatContainer.querySelector('.chat-send-btn');
+      const messagesContainer = chatContainer.querySelector('.chat-messages');
+
+      chatInput.value = '';
+      chatSendBtn.disabled = true; chatSendBtn.textContent = '...';
+
+      // UI + history (user)
+      const userMsgDiv = document.createElement("div");
+      userMsgDiv.className = "chat-message user";
+      userMsgDiv.textContent = question;
+      messagesContainer.appendChild(userMsgDiv);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+      if (!CHAT_HISTORY.has(node.id)) CHAT_HISTORY.set(node.id, []);
+      CHAT_HISTORY.get(node.id).push({ role: 'user', content: question, ts: new Date().toISOString() });
+
+      try {
+        let answer;
+        if (!LIVE) {
+          answer = `*(mock)* Answer about "${node.title}" → ${question}`;
+        } else {
+          const topic = $("inpTopic").value.trim();
+          const audience = $("inpAudience").value.trim() || "general";
+          const model = $("selModel").value;
+          const temperature = parseFloat($("inpTemp").value || "0.3");
+          const history = CHAT_HISTORY.get(node.id) || [];
+          const context = CONTENT.get(node.id) || "(no content)";
+
+          const resp = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ topic, audience, model, temperature, node: { id: node.id, title: node.title }, path, question, context, history })
+          });
+          if (!resp.ok) throw new Error(await resp.text());
+          const data = await resp.json();
+          answer = data.answer || "No answer.";
+        }
+
+        const assistantMsgDiv = document.createElement("div");
+        assistantMsgDiv.className = "chat-message assistant";
+        assistantMsgDiv.innerHTML = renderMarkdown(answer);
+        messagesContainer.appendChild(assistantMsgDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        CHAT_HISTORY.get(node.id).push({ role: 'assistant', content: answer, ts: new Date().toISOString() });
+
+        if (window.MathJax?.typesetPromise) {
+          window.MathJax.typesetPromise([assistantMsgDiv]).catch(()=>{});
+        }
+        
+        autosave();
+      } catch (e) {
+        const errorMsgDiv = document.createElement("div");
+        errorMsgDiv.className = "chat-message assistant";
+        errorMsgDiv.textContent = `Error: ${e.message || String(e)}`;
+        messagesContainer.appendChild(errorMsgDiv);
+      } finally {
+        CHATTING.delete(node.id);
+        chatSendBtn.disabled = false; chatSendBtn.textContent = 'Send';
+        chatInput.focus();
+      }
+    }
+
+    // ----------------------- Video Suggestions -----------------------
+    async function suggestVideos(node, path) {
+      if (FETCHING_VIDEOS.has(node.id)) return;
+      FETCHING_VIDEOS.add(node.id); renderTree(CURRENT_TOC, $("tree"));
+
+      try {
+        const topic = $("inpTopic").value.trim();
+        const q = encodeURIComponent(`${node.title} ${topic}`.trim());
+        const resp = await fetch(`/api/videos?q=${q}`);
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        VIDEOS.set(node.id, data.videos || []);
+        autosave();
+      } catch (e) {
+        $("errorBox").textContent = e.message || String(e);
+      } finally {
+        FETCHING_VIDEOS.delete(node.id);
+        renderTree(CURRENT_TOC, $("tree"));
+      }
+    }
+
+    // ----------------------- Breadcrumb + Expansion + Read -----------------------
+    function renderBreadcrumb() {
+      const bc = $("breadcrumb");
+      if (!BREAD.length) { bc.textContent = ""; return; }
+      bc.innerHTML = BREAD.map((p, i) => `${i ? " / " : ""}<strong>${p.title}</strong>`).join("");
+    }
+
+    function injectChildren(nodeId, children, ancestorPath = []) {
+      function visit(nodes) {
+        for (const n of nodes) {
+          if (n.id === nodeId) {
+            n.children = children;
+            EXP_CACHE.set(nodeId, children);
+            EXPANDED.add(nodeId);
+            for (const a of ancestorPath) EXPANDED.add(a.id); // keep ancestors open
+            return true;
+          }
+          if (n.children && visit(n.children)) return true;
+        }
+        return false;
+      }
+      visit(CURRENT_TOC);
+      $("topCount").textContent = CURRENT_TOC.length;
+      renderTree(CURRENT_TOC, $("tree"));
+      renderBreadcrumb();
+    }
+
+    async function handleNodeClick(node, path) {
+      BREAD = path;
+      for (const p of path) EXPANDED.add(p.id); // ensure all open
+      renderBreadcrumb();
+
+      // already expanded?
+      if (EXP_CACHE.has(node.id)) {
+        EXPANDED.add(node.id);
+        renderTree(CURRENT_TOC, $("tree"));
+        return;
+      }
+
+      if (LIVE) {
+        try {
+          await expandSection(node, path);
+        } catch (e) {
+          console.warn("Expansion failed:", e);
+          $("errorBox").textContent = e.message || String(e);
+        }
+      } else {
+        // Mock expansion when no children yet
+        if (!node.children || node.children.length === 0) {
+          const base = slug(node.title || node.id);
+          const kids = ["Overview", "Key Ideas", "Deep Dive"].map((t, i) => ({
+            id: `${node.id}/${base}-${i + 1}`,
+            title: `${t} — ${node.title}`,
+          }));
+          injectChildren(node.id, kids, path.slice(0, -1));
+          autosave();
+        }
+      }
+    }
+
+    async function expandSection(node, path) {
+      const topic = $("inpTopic").value.trim();
+      const audience = $("inpAudience").value.trim() || "general";
+      const depth = parseInt($("inpDepth").value || "3", 10);
+      const sections = parseInt($("inpSections").value || "5", 10);
+      const model = $("selModel").value;
+      const temperature = parseFloat($("inpTemp").value || "0.3");
+
+      const resp = await fetch("/api/expand", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic, audience, depth, sections, model, temperature, node: { id: node.id, title: node.title }, path })
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+      const kids = data.children || [];
+      injectChildren(node.id, kids, path.slice(0, -1));
+      autosave();
+    }
+
+    async function readSection(node, path) {
+      for (const p of path) EXPANDED.add(p.id);
+
+      if (!LIVE) {
+        // keep your mock as-is
+        const mock = `Summary of "${node.title}":\n• ...\n\n$$\\int_0^1 x^2 dx = 1/3$$`;
+        CONTENT.set(node.id, mock);
+        renderTree(CURRENT_TOC, $("tree")); renderBreadcrumb();
+        autosave();
+        return;
+      }
+
+      if (READING.has(node.id)) return;
+      READING.add(node.id); renderTree(CURRENT_TOC, $("tree"));
+
+      const topic = $("inpTopic").value.trim();
+      const audience = $("inpAudience").value.trim() || "general";
+      const depth = parseInt($("inpDepth").value || "3", 10);
+      const sections = parseInt($("inpSections").value || "5", 10);
+      const model = $("selModel").value;
+      const temperature = parseFloat($("inpTemp").value || "0.3");
+
+      try {
+        const resp = await fetch("/api/read", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic, audience, depth, sections, model, temperature, node: { id: node.id, title: node.title }, path })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        CONTENT.set(node.id, data.content || "No content returned.");
+        autosave();
+      } catch (e) {
+        $("errorBox").textContent = e.message || String(e);
+      } finally {
+        READING.delete(node.id);
+        renderTree(CURRENT_TOC, $("tree"));
+        renderBreadcrumb();
+      }
+    }
+
+    // ----------------------- Generate / Export -----------------------
+    async function generate() {
+      const topic = $("inpTopic").value.trim();
+      const audience = $("inpAudience").value.trim() || "general";
+      const depth = parseInt($("inpDepth").value || "3", 10);
+      const sections = parseInt($("inpSections").value || "5", 10);
+      const model = $("selModel").value;
+      const temperature = parseFloat($("inpTemp").value || "0.3");
+
+      $("errorBox").textContent = "";
+      $("btnGen").disabled = true; $("btnGen").textContent = "Generating…";
+      BREAD = []; EXP_CACHE.clear(); CONTENT.clear(); READING.clear(); EXPANDED.clear(); CHAT_HISTORY.clear(); CHATTING.clear(); VIDEOS.clear(); FETCHING_VIDEOS.clear();
+      $("resultTitle").textContent = topic ? `TOC for: ${topic}` : "No topic yet";
+
+      try {
+        let result;
+        if (!LIVE) {
+          // keep your mock code
+          const stamp = slug(topic || "topic");
+          const clone = JSON.parse(JSON.stringify(example));
+          clone.toc = clone.toc.map(n => ({
+            ...n, id: `${stamp}/${n.id}`, title: `${n.title} — ${topic}`,
+            children: (n.children||[]).map(c => ({ ...c, id: `${stamp}/${c.id}` }))
+          }));
+          result = { toc: clone.toc };
+        } else {
+          const resp = await fetch("/api/toc", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ topic, audience, depth, sections, model, temperature })
+          });
+          if (!resp.ok) throw new Error(await resp.text());
+          result = await resp.json();
+        }
+        CURRENT_TOC = result.toc || [];
+        CURRENT_TOC.forEach(n => EXPANDED.add(n.id));
+        $("topCount").textContent = CURRENT_TOC.length;
+        renderTree(CURRENT_TOC, $("tree"));
+        RUNS += 1; $("runCount").textContent = RUNS;
+        
+        // Track run history
+        RUNS_HISTORY.push({
+          ts: new Date().toISOString(),
+          model,
+          temperature,
+          tokens: result.tokens,
+          requestSummary: `Generated TOC for "${topic}" (${audience} audience)`
+        });
+        
+        autosave();
+      } catch (e) {
+        $("errorBox").textContent = e.message || String(e);
+      } finally {
+        $("btnGen").disabled = false; $("btnGen").textContent = "Generate TOC";
+      }
+    }
+
+    function copyJSON() {
+      if (!CURRENT_TOC.length) return;
+      const text = JSON.stringify({ toc: CURRENT_TOC }, null, 2);
+      navigator.clipboard.writeText(text);
+    }
+
+    function exportJSON() {
+      if (!CURRENT_TOC.length) return;
+      const topic = $("inpTopic").value.trim() || "topic";
+      blobDownload(`toc-${slug(topic)}.json`, JSON.stringify({ toc: CURRENT_TOC }, null, 2));
+    }
+
+    function toMarkdown(nodes, level = 1) {
+      let md = "";
+      for (const node of nodes) {
+        md += `${"#".repeat(Math.min(level, 6))} ${node.title}\n`;
+        if (node.description) md += `${node.description}\n`;
+        md += `\n`;
+        if (node.children?.length) md += toMarkdown(node.children, level + 1);
+      }
+      return md;
+    }
+
+    function exportMD() {
+      if (!CURRENT_TOC.length) return;
+      const topic = $("inpTopic").value.trim() || "topic";
+      const md = `# Table of Contents — ${topic}\n\n` + toMarkdown(CURRENT_TOC, 2);
+      blobDownload(`toc-${slug(topic)}.md`, md, "text/markdown");
+    }
+
+    // ----------------------- Hooks -----------------------
+    $("inpTemp").addEventListener("input", (e) => $("tempVal").textContent = Number(e.target.value).toFixed(2));
+    $("btnGen").addEventListener("click", generate);
+    $("btnSaveNotebook").addEventListener("click", saveNotebook);
+    $("btnOpenNotebook").addEventListener("click", openNotebook);
+    $("btnCopyJSON").addEventListener("click", copyJSON);
+    $("btnExportJSON").addEventListener("click", exportJSON);
+    $("btnExportMD").addEventListener("click", exportMD);
+    $("btnUseMock").addEventListener("click", () => { LIVE = false; $("statusText").textContent = "Mock"; });
+    $("btnUseLive").addEventListener("click", () => { LIVE = true; $("statusText").textContent = "Live"; });
+    $("btnUndo").addEventListener("click", undoLastChange);
+
+    // Selection toolbar event listeners
+    $("btnDiveDeep").addEventListener("click", diveDeep);
+    $("btnCopySelection").addEventListener("click", copySelection);
+    $("btnAskAboutSelection").addEventListener("click", askAboutSelection);
+
+    // Selection handling
+    document.addEventListener("selectionchange", () => {
+      const selectionInfo = getSelectionInfo();
+      if (selectionInfo) {
+        showSelectionToolbar(selectionInfo);
+      } else {
+        hideSelectionToolbar();
+      }
+    });
+
+    // Also handle mouseup for better selection detection
+    document.addEventListener("mouseup", () => {
+      setTimeout(() => {
+        const selectionInfo = getSelectionInfo();
+        if (selectionInfo) {
+          showSelectionToolbar(selectionInfo);
+        } else {
+          hideSelectionToolbar();
+        }
+      }, 10); // Small delay to ensure selection is complete
+    });
+
+    // Hide toolbar on click outside
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest("#selectionToolbar")) {
+        hideSelectionToolbar();
+      }
+    });
+
+    // Hide toolbar on scroll
+    document.addEventListener("scroll", () => {
+      hideSelectionToolbar();
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        if (currentSelection) {
+          diveDeep();
+        }
+      }
+      if (e.key === 'Escape') {
+        hideSelectionToolbar();
+      }
+    });
+
+    // Initialize autosave on page load
+    document.addEventListener("DOMContentLoaded", () => {
+      // Try to load autosave on startup
+      if (!loadAutosave()) {
+        // If no autosave was loaded, set up autosave for future changes
+        autosave();
+      }
+      updateUndoButton();
+    });
+  </script>
+</body>
+</html>
