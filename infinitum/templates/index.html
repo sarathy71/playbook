@@ -155,7 +155,7 @@
     .nav-mode-inline { display: block; }
     
     .left-nav-sidebar { 
-      width: 260px; 
+      width: 262px; 
       background: #fff; 
       border-right: 1px solid var(--ring); 
       overflow-y: auto; 
@@ -165,23 +165,43 @@
     }
     
     
+    .left-nav-title-bar {
+      background: #f8f9fa;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 8px 12px;
+      font-weight: 600;
+      font-size: 14px;
+      color: #374151;
+      text-align: center;
+    }
+    
+    .left-nav-title-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    
     .left-nav-tree {
-      padding: 8px;
+      padding: 1px;
     }
     
     .main-content-pane { 
       flex: 1; 
       overflow-y: auto; 
-      padding: 12px 16px;
+      padding: 4px 16px 12px 16px;
       background: var(--bg);
       max-width: none;
+      position: relative;
     }
     
     .left-nav-tree { list-style: none; padding: 0; margin: 0; }
-    .left-nav-tree li { margin: 0; }
+    .left-nav-tree li { 
+      margin: 0; 
+      list-style: none;
+    }
     .left-nav-node { 
       display: block; 
-      padding: 6px 10px; 
+      padding: 2px 2px; 
       border-radius: 4px; 
       cursor: pointer; 
       transition: all 0.2s;
@@ -199,7 +219,7 @@
       position: relative;
     }
     .left-nav-node.deep-dive::before {
-      content: "🔍";
+      content: "";
       position: absolute;
       left: -20px;
       top: 50%;
@@ -207,47 +227,35 @@
       font-size: 12px;
     }
     .left-nav-children { 
-      margin-left: 16px; 
-      margin-top: 2px;
-      position: relative;
-    }
-    
-    .left-nav-children::before {
-      content: '';
-      position: absolute;
-      left: -8px;
-      top: 0;
-      bottom: 0;
-      width: 1px;
-      background: linear-gradient(to bottom, #d1d5db, transparent);
+      margin-left: 0; 
+      margin-top: 1px;
+      padding-left: 4px;
     }
     
     .left-nav-children li {
       position: relative;
     }
-    
-    .left-nav-children li::before {
-      content: '';
-      position: absolute;
-      left: -8px;
-      top: 12px;
-      width: 8px;
-      height: 1px;
-      background: linear-gradient(to right, #d1d5db, transparent);
-    }
     .left-nav-toggle { 
       display: inline-block; 
-      width: 14px; 
+      width: 10px; 
       text-align: center; 
-      margin-right: 6px;
-      cursor: pointer;
-      font-size: 10px;
+      margin-right: 2px; 
+      cursor: pointer; 
+      font-size: 12px; 
     }
-    .left-nav-toggle::before { content: "▸"; }
-    .left-nav-toggle.expanded::before { content: "▾"; }
-    .left-nav-title { font-size: 11px; line-height: 1.3; }
+    .left-nav-toggle::before { content: ""; }
+    .left-nav-toggle.expanded::before { content: ""; }
+    .left-nav-title { font-size: 13px; line-height: 1.3; }
+    .left-nav-number { 
+      font-size: 12px; 
+      font-weight: 500; 
+      color: #666; 
+      margin-right: 4px;
+      min-width: 12px;
+      display: inline-block;
+    }
     .left-nav-description { 
-      font-size: 11px; 
+      font-size: 12px; 
       color: var(--muted); 
       margin-top: 2px; 
       line-height: 1.3;
@@ -256,7 +264,7 @@
     @media (max-width: 768px) {
       .left-nav-sidebar { 
         position: fixed; 
-        left: -260px; 
+        left: -262px; 
         top: 0; 
         height: 100vh; 
         z-index: 1001;
@@ -306,6 +314,22 @@
     .chat-container { max-width: none; }
     .level-content { max-width: none; }
     
+    /* Clean inline tree without connectors */
+    .tree .children {
+      margin-left: 1px;
+      list-style: none;
+    }
+    .tree .children li {
+      list-style: none;
+    }
+    
+    /* Enhanced focus states for accessibility */
+    .left-nav-node:focus,
+    .tree .node-head:focus {
+      outline: 2px solid #3b82f6;
+      outline-offset: 2px;
+    }
+    
     /* Comfortable reading width option */
     .comfortable-width .readbox,
     .comfortable-width .chat-message,
@@ -326,38 +350,94 @@
       margin: 0 auto;
     }
     
-    .content-controls {
-      display: flex;
-      gap: 16px;
-      margin: 12px 0;
-      padding: 8px 0;
-      border-bottom: 1px solid var(--ring);
+    .selected-node-content {
+      margin-top: 0;
+      padding-top: 0;
     }
     
-    .control-checkbox {
+    .sticky-actions-container {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 8px 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+    
+    .node-actions {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
+    }
+    
+    .actions-label {
+      font-size: 12px;
+      color: #666;
+      font-weight: 500;
+    }
+    
+    .actions-dropdown {
+      position: relative;
+    }
+    
+    .actions-trigger {
+      background: none;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 16px;
+      color: #666;
+      transition: all 0.2s;
+    }
+    
+    .actions-trigger:hover {
+      background: #f5f5f5;
+      border-color: #999;
+    }
+    
+    .actions-menu {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      padding: 8px;
+      min-width: 200px;
+      display: none;
+      z-index: 1001;
+    }
+    
+    .actions-dropdown:hover .actions-menu {
+      display: block;
+    }
+    
+    .action-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      cursor: pointer;
       font-size: 13px;
-      color: var(--ink);
-      cursor: pointer;
+      transition: background 0.2s;
     }
     
-    .control-checkbox input[type="checkbox"] {
+    .action-item:hover {
+      background: #f8f9fa;
+    }
+    
+    .action-item input[type="checkbox"] {
       margin: 0;
-      cursor: pointer;
     }
     
-    .btn.read {
-      background: #10b981;
-      color: white;
-      border-color: #10b981;
-    }
     
-    .btn.read:hover {
-      background: #059669;
-      border-color: #059669;
-    }
   </style>
 </head>
 <body>
@@ -370,7 +450,7 @@
       </div>
       
       <!-- Settings Panel -->
-      <div class="gear-icon" onclick="toggleSettings()" title="Settings" style="position:absolute; right:4px; z-index: 1;">
+      <div class="gear-icon" onclick="toggleSettings()" title="Settings" style="position:absolute; top:50%; transform:translateY(-50%); right:4px; z-index: 1;">
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
         </svg>
@@ -474,6 +554,9 @@
       <div id="navContainer" class="nav-mode-leftnav">
         <!-- Left Navigation Sidebar -->
         <div id="leftNavSidebar" class="left-nav-sidebar">
+          <div id="leftNavTitleBar" class="left-nav-title-bar">
+            <div id="leftNavTitle" class="left-nav-title-text">Topic</div>
+          </div>
           <div id="leftNavTree" class="left-nav-tree"></div>
         </div>
         
@@ -1387,8 +1470,8 @@ Requirements:
       const ul = document.createElement('ul');
       ul.className = 'left-nav-tree';
       
-      CURRENT_TOC.forEach(node => {
-        const li = createLeftNavNode(node, 0);
+      CURRENT_TOC.forEach((node, index) => {
+        const li = createLeftNavNode(node, 0, `${index + 1}`);
         ul.appendChild(li);
       });
       
@@ -1401,9 +1484,14 @@ Requirements:
           selectNodeInLeftNav(firstNode.id);
         }
       }
+      
+      // Restore highlighting for the currently selected node
+      if (SELECTED_NODE_ID) {
+        updateLeftNavHighlighting(SELECTED_NODE_ID);
+      }
     }
 
-    function createLeftNavNode(node, depth) {
+    function createLeftNavNode(node, depth, number = '') {
       const li = document.createElement('li');
       const hasChildren = node.children && node.children.length > 0;
       const isDeepDive = DEEP_DIVES.some(dd => dd.newChildIds.includes(node.id));
@@ -1411,6 +1499,11 @@ Requirements:
       const nodeDiv = document.createElement('div');
       nodeDiv.className = `left-nav-node ${isDeepDive ? 'deep-dive' : ''}`;
       nodeDiv.dataset.nodeId = node.id;
+      
+      // Apply depth-based indentation
+      if (depth > 0) {
+        nodeDiv.style.paddingLeft = `${4 + (depth * 4)}px`;
+      }
       
       if (hasChildren) {
         const toggle = document.createElement('span');
@@ -1422,10 +1515,19 @@ Requirements:
         nodeDiv.appendChild(toggle);
       } else {
         const spacer = document.createElement('span');
-        spacer.style.width = '16px';
+        spacer.style.width = '12px';
         spacer.style.display = 'inline-block';
         nodeDiv.appendChild(spacer);
       }
+      
+      // Add numbering
+      const numberSpan = document.createElement('span');
+      numberSpan.className = 'left-nav-number';
+      numberSpan.textContent = number + ' ';
+      numberSpan.style.marginRight = '4px';
+      numberSpan.style.fontWeight = '500';
+      numberSpan.style.color = '#666';
+      nodeDiv.appendChild(numberSpan);
       
       const title = document.createElement('span');
       title.className = 'left-nav-title';
@@ -1436,6 +1538,11 @@ Requirements:
       nodeDiv.addEventListener('click', () => {
         selectNodeInLeftNav(node.id);
         if (!hasChildren) {
+          // Show loading indicator immediately
+          const mainContentPane = $("mainContentPane");
+          if (mainContentPane) {
+            mainContentPane.innerHTML = '<div class="loading-indicator"><p><em>Loading...</em></p></div>';
+          }
           // Auto-read content for leaf nodes
           readSection(node, getNodePath(node.id));
         }
@@ -1448,8 +1555,9 @@ Requirements:
         childrenUl.className = 'left-nav-children';
         childrenUl.style.display = EXPANDED.has(node.id) ? 'block' : 'none';
         
-        node.children.forEach(child => {
-          const childLi = createLeftNavNode(child, depth + 1);
+        node.children.forEach((child, index) => {
+          const childNumber = number ? `${number}.${index + 1}` : `${index + 1}`;
+          const childLi = createLeftNavNode(child, depth + 1, childNumber);
           childrenUl.appendChild(childLi);
         });
         
@@ -1476,15 +1584,8 @@ Requirements:
     function selectNodeInLeftNav(nodeId) {
       SELECTED_NODE_ID = nodeId;
       
-      // Update active state in left nav
-      document.querySelectorAll('.left-nav-node').forEach(node => {
-        node.classList.remove('active');
-      });
-      
-      const activeNode = document.querySelector(`[data-node-id="${nodeId}"]`);
-      if (activeNode) {
-        activeNode.classList.add('active');
-      }
+      // Update highlighting using centralized function
+      updateLeftNavHighlighting(nodeId);
       
       // Render content in main pane
       renderSelectedNodeContent(nodeId);
@@ -1500,37 +1601,17 @@ Requirements:
       const contentDiv = document.createElement('div');
       contentDiv.className = 'selected-node-content';
       
-      // Add node title and description
-      const header = document.createElement('div');
-      header.className = 'node-header';
-      header.innerHTML = `
-        <h2>${node.title}</h2>
-        ${node.description ? `<p class="node-description">${node.description}</p>` : ''}
-      `;
-      contentDiv.appendChild(header);
-      
-      // Add control checkboxes
-      const controlsDiv = document.createElement('div');
-      controlsDiv.className = 'content-controls';
-      controlsDiv.innerHTML = `
-        <label class="control-checkbox">
-          <input type="checkbox" id="levelsToggle-${nodeId}" ${LEVELS_ENABLED.has(nodeId) ? 'checked' : ''}>
-          <span>Levels</span>
-        </label>
-        <label class="control-checkbox">
-          <input type="checkbox" id="deepDiveContext-${nodeId}" ${DEEP_WITH_CONTEXT.has(nodeId) ? 'checked' : ''}>
-          <span>Deep dive with context</span>
-        </label>
-      `;
-      contentDiv.appendChild(controlsDiv);
       
       // Add content or Levels UI
+      console.log(`renderSelectedNodeContent: nodeId=${nodeId}, LEVELS_ENABLED.has(nodeId)=${LEVELS_ENABLED.has(nodeId)}`);
       if (LEVELS_ENABLED.has(nodeId)) {
         const activeLevel = ACTIVE_LEVEL.get(nodeId) || 5;
+        console.log(`Creating levels UI with activeLevel=${activeLevel}`);
 
         // Create tabs container
         const tabsContainer = document.createElement('div');
         tabsContainer.className = 'levels-tabs';
+        console.log(`Creating tabs container for nodeId: ${nodeId}`);
         for (let level = 1; level <= 10; level++) {
           const tab = document.createElement('button');
           tab.className = 'level-tab';
@@ -1544,6 +1625,7 @@ Requirements:
           });
           tabsContainer.appendChild(tab);
         }
+        console.log(`Appending tabs container with ${tabsContainer.children.length} tabs to contentDiv`);
         contentDiv.appendChild(tabsContainer);
 
         const levelContentDiv = document.createElement('div');
@@ -1564,6 +1646,20 @@ Requirements:
           });
         }
         contentDiv.appendChild(levelContentDiv);
+        
+        // Add chat interface after levels content is rendered
+        const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 5)})` : "";
+        const chatContainer = document.createElement('div');
+        chatContainer.className = 'chat-container';
+        chatContainer.innerHTML = `
+          <div class="chat-header">Ask questions about ${node.title}${levelInfo}</div>
+          <div class="chat-messages"></div>
+          <div class="chat-input-container">
+            <input type="text" class="chat-input" placeholder="Ask a question..." />
+            <button class="chat-send-btn">Send</button>
+          </div>
+        `;
+        contentDiv.appendChild(chatContainer);
 
       } else if (CONTENT.has(nodeId)) {
         const readbox = document.createElement('div');
@@ -1573,92 +1669,94 @@ Requirements:
         // Delay typesetting to ensure DOM is ready for MathJax
         setTimeout(() => typesetMath(readbox).then(() => emitContentRendered(nodeId)).catch(() => emitContentRendered(nodeId)), 30);
         
-        // Add read button with "read" state
-        const readBtn = document.createElement('button');
-        readBtn.id = `readBtn-${nodeId}`;
-        readBtn.textContent = 'Read';
-        readBtn.className = 'btn read';
-        readBtn.addEventListener('click', () => {
-          readSection(node, getNodePath(nodeId));
-        });
-        contentDiv.appendChild(readBtn);
+        // Add chat interface after text content is rendered
+        const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 5)})` : "";
+        const chatContainer = document.createElement('div');
+        chatContainer.className = 'chat-container';
+        chatContainer.innerHTML = `
+          <div class="chat-header">Ask questions about ${node.title}${levelInfo}</div>
+          <div class="chat-messages"></div>
+          <div class="chat-input-container">
+            <input type="text" class="chat-input" placeholder="Ask a question..." />
+            <button class="chat-send-btn">Send</button>
+          </div>
+        `;
+        contentDiv.appendChild(chatContainer);
       } else {
-        // Add read button
-        const readBtn = document.createElement('button');
-        readBtn.id = `readBtn-${nodeId}`;
-        readBtn.textContent = 'Read';
-        readBtn.className = 'btn';
-        readBtn.addEventListener('click', async (ev) => {
-          ev?.stopPropagation();
-          readBtn.classList.add('active-reading');
-          readBtn.disabled = true;
-          try {
-            await readSection(node, getNodePath(nodeId));
-          } finally {
-            try {
-              const mainPane = $("mainContentPane");
-              await new Promise((resolve) => {
-                let done = false;
-                const handler = (e) => {
-                  if (e.detail && e.detail.nodeId === nodeId) {
-                    if (!done) { done = true; mainPane.removeEventListener('contentRendered', handler); resolve(); }
-                  }
-                };
-                mainPane.addEventListener('contentRendered', handler);
-                setTimeout(() => { if (!done) { done = true; mainPane.removeEventListener('contentRendered', handler); resolve(); } }, 3000);
-              });
-            } catch (e) {
-              // ignore
-            }
-            readBtn.classList.remove('active-reading');
-            readBtn.disabled = false;
-            if (NAV_MODE === 'leftnav') renderLeftNavTree(); else renderTree(CURRENT_TOC);
-          }
-        });
-        contentDiv.appendChild(readBtn);
+        // Show loading indicator when no content is available yet
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'loading-indicator';
+        loadingDiv.innerHTML = '<p><em>Loading...</em></p>';
+        contentDiv.appendChild(loadingDiv);
       }
-      
-      // Add chat interface
-      const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 5)})` : "";
-      const chatContainer = document.createElement('div');
-      chatContainer.className = 'chat-container';
-      chatContainer.innerHTML = `
-        <div class="chat-header">Ask questions about ${node.title}${levelInfo}</div>
-        <div class="chat-messages"></div>
-        <div class="chat-input-container">
-          <input type="text" class="chat-input" placeholder="Ask a question..." />
-          <button class="chat-send-btn">Send</button>
-        </div>
-      `;
-      contentDiv.appendChild(chatContainer);
       
       // Clear and populate main content pane
       mainContentPane.innerHTML = '';
       mainContentPane.appendChild(contentDiv);
-      // Wire up the Levels checkbox in the main content (if present)
-      const levelsCheckboxMain = document.getElementById(`levelsToggle-${nodeId}`);
-      if (levelsCheckboxMain) {
-        levelsCheckboxMain.addEventListener('change', (ev) => {
-          ev.stopPropagation();
-          toggleLevels(nodeId);
-        });
-      }
       
-      // Wire up the Deep-dive with context checkbox in the main content
-      const deepContextCheckboxMain = document.getElementById(`deepDiveContext-${nodeId}`);
-      if (deepContextCheckboxMain) {
-        deepContextCheckboxMain.addEventListener('change', (ev) => {
-          ev.stopPropagation();
-          if (deepContextCheckboxMain.checked) DEEP_WITH_CONTEXT.add(nodeId); else DEEP_WITH_CONTEXT.delete(nodeId);
-          autosave();
-        });
+      // Add sticky actions dropdown to main content pane (after content is set)
+      if (mainContentPane) {
+        // Remove any existing actions container
+        const existingActions = mainContentPane.querySelector('.sticky-actions-container');
+        if (existingActions) {
+          existingActions.remove();
+        }
+        
+        const actionsContainer = document.createElement('div');
+        actionsContainer.className = 'sticky-actions-container';
+        actionsContainer.innerHTML = `
+          <div class="node-actions">
+            <span class="actions-label">Actions</span>
+            <div class="actions-dropdown">
+              <button class="actions-trigger" title="Actions">⋯</button>
+              <div class="actions-menu">
+                <label class="action-item">
+                  <input type="checkbox" id="levelsToggle-${nodeId}" ${LEVELS_ENABLED.has(nodeId) ? 'checked' : ''}>
+                  <span>Levels</span>
+                </label>
+                <label class="action-item">
+                  <input type="checkbox" id="deepDiveContext-${nodeId}" ${DEEP_WITH_CONTEXT.has(nodeId) ? 'checked' : ''}>
+                  <span>Deep dive with context</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        `;
+        mainContentPane.appendChild(actionsContainer);
+        
+        // Add event listeners for action items
+        const escapedNodeId = nodeId.replace(/\//g, '\\/');
+        const levelsToggle = actionsContainer.querySelector(`#levelsToggle-${escapedNodeId}`);
+        if (levelsToggle) {
+          console.log(`Adding event listener to levelsToggle for nodeId: ${nodeId}`);
+          levelsToggle.addEventListener('change', (ev) => {
+            console.log(`Levels checkbox changed for nodeId: ${nodeId}, checked: ${ev.target.checked}`);
+            ev.stopPropagation();
+            toggleLevels(nodeId);
+          });
+        } else {
+          console.log(`Could not find levelsToggle element for nodeId: ${nodeId}`);
+        }
+        
+        const deepDiveContext = actionsContainer.querySelector(`#deepDiveContext-${escapedNodeId}`);
+        if (deepDiveContext) {
+          deepDiveContext.addEventListener('change', (ev) => {
+            ev.stopPropagation();
+            if (deepDiveContext.checked) {
+              DEEP_WITH_CONTEXT.add(nodeId);
+            } else {
+              DEEP_WITH_CONTEXT.delete(nodeId);
+            }
+            autosave();
+          });
+        }
       }
-      
-      // Update left nav highlighting
-      updateLeftNavHighlighting(nodeId);
       
       // Initialize chat for this node
-      initializeChatForNode(nodeId, chatContainer);
+      const chatContainer = contentDiv.querySelector('.chat-container');
+      if (chatContainer) {
+        initializeChatForNode(nodeId, chatContainer);
+      }
     }
 
     function updateLeftNavHighlighting(nodeId) {
@@ -1673,17 +1771,6 @@ Requirements:
       }
     }
 
-    function updateReadButtonState(nodeId) {
-      // Update Read button state in the main content pane
-      const readBtn = document.querySelector(`#readBtn-${nodeId}`);
-      if (readBtn) {
-        if (CONTENT.has(nodeId)) {
-          readBtn.classList.add('read');
-        } else {
-          readBtn.classList.remove('read');
-        }
-      }
-    }
 
     function findFirstSelectableNode(nodes) {
       for (const node of nodes) {
@@ -1747,8 +1834,11 @@ Requirements:
     // ----------------------- Levels Management Functions -----------------------
     function toggleLevels(nodeId) {
       try {
+        console.log(`toggleLevels called for nodeId: ${nodeId}, currently enabled: ${LEVELS_ENABLED.has(nodeId)}`);
+        
         if (LEVELS_ENABLED.has(nodeId)) {
           // Turn OFF levels
+          console.log('Turning OFF levels');
           LEVELS_ENABLED.delete(nodeId);
           
           // Restore Level 5 content to main CONTENT
@@ -1760,6 +1850,7 @@ Requirements:
           
         } else {
           // Turn ON levels
+          console.log('Turning ON levels');
           LEVELS_ENABLED.add(nodeId);
           
           // Initialize level content map if not exists
@@ -1779,16 +1870,17 @@ Requirements:
         }
         
         autosave();
+        
+        // If the toggled node is currently selected in the main pane, re-render its content immediately
+        if (SELECTED_NODE_ID === nodeId) {
+          renderSelectedNodeContent(nodeId);
+        }
+        
         // Re-render navigation tree or inline tree
         if (NAV_MODE === 'leftnav') {
           renderLeftNavTree();
         } else {
           renderTree(CURRENT_TOC);
-        }
-
-        // If the toggled node is currently selected in the main pane, re-render its content
-        if (SELECTED_NODE_ID === nodeId) {
-          renderSelectedNodeContent(nodeId);
         }
       } catch (error) {
         console.error("Error toggling levels:", error);
@@ -1934,15 +2026,7 @@ Requirements:
       const node = findNodeById(CURRENT_TOC, nodeId);
       if (!node) return;
 
-      // Show confirmation modal
-      const confirmed = confirm(
-        `Dive deeper into:\n\n"${selectionInfo.snippet}"\n\nThis will create new child sections based on the selected text. Continue?`
-      );
-      
-      if (!confirmed) {
-        hideSelectionToolbar();
-        return;
-      }
+      // Deep dive confirmed - proceed directly
 
       try {
         const topic = $("inpTopic").value.trim();
@@ -2456,12 +2540,12 @@ Requirements:
       const readBtn = txt.querySelector('button[data-read]');
       if (readBtn) {
         readBtn.addEventListener('click', async (ev) => {
-          ev.stopPropagation();
+        ev.stopPropagation();
           // Immediate visual feedback
           readBtn.classList.add('active-reading');
           readBtn.disabled = true;
           try {
-            await readSection(node, path.concat({ id: node.id, title: node.title }));
+        await readSection(node, path.concat({ id: node.id, title: node.title }));
           } finally {
             try {
               if (SELECTED_NODE_ID === node.id) {
@@ -2628,7 +2712,7 @@ Requirements:
           rb.innerHTML = renderMarkdown(fullContent);
         }
         
-  wrap.appendChild(rb);
+        wrap.appendChild(rb);
   // Process math expressions with MathJax (short delay)
   setTimeout(() => typesetMath(rb), 30);
         }
@@ -2935,8 +3019,6 @@ Requirements:
         CONTENT.set(node.id, mock);
         }
         
-        // Update Read button state
-        updateReadButtonState(node.id);
         
         if (NAV_MODE === 'leftnav') {
           // In left nav mode, just update the selected node content
@@ -2989,8 +3071,6 @@ Requirements:
         CONTENT.set(node.id, fullContent);
         SUMMARIES.set(node.id, summary);
         
-        // Update Read button state
-        updateReadButtonState(node.id);
         
         // Check visualization eligibility
         checkVisualizationEligibility(node.id);
@@ -3057,6 +3137,12 @@ Requirements:
         CURRENT_TOC.forEach(n => EXPANDED.add(n.id));
         const topCountEl = document.getElementById("topCount");
         if (topCountEl) topCountEl.textContent = CURRENT_TOC.length;
+        
+        // Update navigation title with the topic name
+        const leftNavTitle = document.getElementById("leftNavTitle");
+        if (leftNavTitle) {
+          leftNavTitle.textContent = topic || "Topic";
+        }
         if (NAV_MODE === 'leftnav') {
           renderLeftNavTree();
           // Auto-select first node

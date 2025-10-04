@@ -161,3 +161,4 @@ echo -e "${YELLOW}🔧 Environment Variables to Set:${NC}"
 echo "- OPENAI_API_KEY=your-openai-api-key"
 echo "- YOUTUBE_API_KEY=your-youtube-api-key (optional)"
 echo ""
+

@@ -37,3 +37,4 @@ resources:
 handlers:
 - url: /.*
   script: auto
+
