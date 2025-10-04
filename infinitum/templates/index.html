@@ -125,6 +125,24 @@
     .selection-toolbar button:hover { background:#f8f9fa; }
     .selection-toolbar button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
     .selection-toolbar button.primary:hover { background:#0f1419; }
+    /* Loading state for Dive Deep button */
+    .selection-toolbar button.primary.loading {
+      background: #e5e7eb; /* neutral light grey */
+      color: #111827; /* dark text for contrast */
+      position: relative;
+      pointer-events: none;
+      opacity: 0.98;
+      border-color: #d1d5db;
+    }
+    .selection-toolbar button.primary.loading:after {
+      content: '…';
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-weight: 700;
+      color: #374151;
+    }
     .deepdive-chip { display:inline-flex; align-items:center; gap:4px; background:#e3f2fd; color:#1565c0; font-size:10px; padding:2px 6px; border-radius:4px; margin-left:8px; }
     .deepdive-chip:hover { background:#bbdefb; }
     .undo-btn { font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--ring); background:#fff; cursor:pointer; color:var(--muted); }
@@ -2305,7 +2323,10 @@ Requirements:
     }
 
     async function diveDeep() {
+      const diveBtn = document.getElementById('btnDiveDeep');
       if (!currentSelection) return;
+      // Indicate loading/active state
+      if (diveBtn) { diveBtn.classList.add('loading'); diveBtn.disabled = true; }
       
       const selectionInfo = currentSelection;
       const nodeId = selectionInfo.nodeId;
@@ -2404,22 +2425,51 @@ Requirements:
           EXPANDED.add(wrapper.children[0].id);
         }
 
-        // Set content only for the first child (Overview)
-        if (wrapper.children.length > 0 && wrapper.children[0].readContent) {
-          // Normalize math delimiters in the deep dive content
-          const normalizedContent = normalizeMathDelimiters(wrapper.children[0].readContent);
-          CONTENT.set(wrapper.children[0].id, normalizedContent);
-          
-          // Initialize chat history for Overview with system message
-          const overviewId = wrapper.children[0].id;
-          if (!CHAT_HISTORY.has(overviewId)) {
-            CHAT_HISTORY.set(overviewId, []);
+        // Set content for the Overview by composing structured sections from all deep-dive children
+        if (wrapper.children.length > 0) {
+          const overviewNode = wrapper.children[0];
+          const overviewId = overviewNode.id;
+          try {
+            // Build composed markdown: title + sections for each child (heading + content/description)
+            let composed = `# ${wrapper.title}\n\n`;
+            for (const child of wrapper.children) {
+              const title = child.title || '';
+              const desc = child.description || '';
+              const rawContent = child.readContent || '';
+              const normalized = normalizeMathDelimiters(rawContent || desc || '');
+              // Use an H2 for child sections to keep hierarchy clear
+              composed += `## ${title}\n\n${normalized}\n\n`;
+            }
+
+            // Save composed content as the overview's full content
+            CONTENT.set(overviewId, composed);
+
+            // Initialize chat history for Overview with system message
+            if (!CHAT_HISTORY.has(overviewId)) {
+              CHAT_HISTORY.set(overviewId, []);
+            }
+            CHAT_HISTORY.get(overviewId).push({
+              role: 'system',
+              content: `Overview created from selection: "${selectionInfo.snippet}"`,
+              ts: new Date().toISOString()
+            });
+
+            // Generate and store a summary for the composed content
+            try {
+              const summary = await generateSummary(overviewId, composed);
+              if (summary) SUMMARIES.set(overviewId, summary);
+            } catch (e) {
+              console.warn('Summary generation for deep-dive overview failed:', e);
+            }
+
+            // Check visualization eligibility for the overview
+            try { checkVisualizationEligibility(overviewId); } catch (e) { /* ignore */ }
+
+            // Persist autosave state after inserting deep-dive content
+            autosave();
+          } catch (e) {
+            console.error('Failed to set deep dive overview content:', e);
           }
-          CHAT_HISTORY.get(overviewId).push({
-            role: 'system',
-            content: `Overview created from selection: "${selectionInfo.snippet}"`,
-            ts: new Date().toISOString()
-          });
         }
 
         // Track deep dive event
@@ -2492,6 +2542,8 @@ Requirements:
         console.error("Deep dive failed:", e);
         showError(`Deep dive failed: ${e.message}`);
         hideSelectionToolbar();
+      } finally {
+        if (diveBtn) { diveBtn.classList.remove('loading'); diveBtn.disabled = false; }
       }
     }
 
