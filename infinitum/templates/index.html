@@ -36,10 +36,10 @@
     * { box-sizing: border-box; }
     html, body { height: 100%; }
     body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Inter, sans-serif; color: var(--ink); background: linear-gradient(135deg,#f8fafc,#e5e7eb); }
-    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
-    .row { display: grid; grid-template-columns: 1.2fr .8fr .8fr; gap: 16px; }
-    .row-1 { display: grid; grid-template-columns: 1fr; gap: 16px; }
-    .card { background: var(--card); border: 1px solid var(--ring); border-radius: 16px; padding: 16px; box-shadow: 0 6px 20px rgba(0,0,0,0.05); }
+    .wrap { max-width: 100%; margin: 0; padding: 12px 16px; }
+    .row { display: grid; grid-template-columns: 1.2fr .8fr .8fr; gap: 12px; }
+    .row-1 { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .card { background: var(--card); border: 1px solid var(--ring); border-radius: 8px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
     .title { font-weight: 800; font-size: 22px; letter-spacing: -0.2px; }
     label { display:block; font-size:12px; color: var(--muted); margin-bottom:6px; }
     input[type="text"], input[type="number"], input[type="password"], select { width:100%; padding:10px 12px; border:1px solid var(--ring); border-radius:12px; outline:none; }
@@ -148,6 +148,152 @@
     .modal-loading { text-align:center; padding:40px; color:var(--muted); }
     .modal-caption { font-size:14px; color:var(--ink); text-align:center; margin-top:10px; font-style:italic; }
     .summary-box { background:#f8f9fa; border:1px solid var(--ring); border-radius:8px; padding:12px; margin-bottom:15px; font-size:14px; line-height:1.5; color:var(--ink); }
+    
+    /* Navigation Mode Styles */
+    .nav-mode-leftnav { display: flex; height: calc(100vh - 80px); }
+    .nav-mode-inline { display: block; }
+    
+    .left-nav-sidebar { 
+      width: 260px; 
+      background: #fff; 
+      border-right: 1px solid var(--ring); 
+      overflow-y: auto; 
+      padding: 0;
+      flex-shrink: 0;
+      transition: width 0.3s ease;
+    }
+    
+    .left-nav-sidebar.collapsed {
+      width: 40px;
+    }
+    
+    .left-nav-header {
+      position: relative;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px;
+      border-bottom: 1px solid var(--ring);
+      background: #f8f9fa;
+    }
+    
+    .left-nav-header .left-nav-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    
+    .left-nav-toggle-btn {
+      position: absolute;
+      right: -12px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: #fff;
+      border: 1px solid var(--ring);
+      border-left: none;
+      cursor: pointer;
+      padding: 8px 4px;
+      border-radius: 0 6px 6px 0;
+      color: var(--muted);
+      font-size: 12px;
+      transition: all 0.2s;
+      z-index: 10;
+      box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+    }
+    
+    .left-nav-toggle-btn:hover {
+      background: var(--ring);
+      color: var(--ink);
+      box-shadow: 2px 0 6px rgba(0,0,0,0.15);
+    }
+    
+    .left-nav-sidebar.collapsed .left-nav-toggle-btn {
+      transform: rotate(180deg);
+    }
+    
+    .left-nav-sidebar.collapsed .left-nav-header .left-nav-title {
+      display: none;
+    }
+    
+    .left-nav-sidebar.collapsed .left-nav-tree {
+      display: none;
+    }
+    
+    .left-nav-tree {
+      padding: 12px;
+    }
+    
+    .main-content-pane { 
+      flex: 1; 
+      overflow-y: auto; 
+      padding: 12px 16px;
+      background: var(--bg);
+      max-width: none;
+    }
+    
+    .left-nav-tree { list-style: none; padding: 0; margin: 0; }
+    .left-nav-tree li { margin: 0; }
+    .left-nav-node { 
+      display: block; 
+      padding: 8px 12px; 
+      border-radius: 6px; 
+      cursor: pointer; 
+      transition: all 0.2s;
+      border-left: 3px solid transparent;
+      margin-bottom: 2px;
+    }
+    .left-nav-node:hover { background: #f8f9fa; }
+    .left-nav-node.active { 
+      background: #e3f2fd; 
+      border-left-color: #2196f3; 
+      font-weight: 600;
+    }
+    .left-nav-node.deep-dive { 
+      border-left-color: #ff9800; 
+      position: relative;
+    }
+    .left-nav-node.deep-dive::before {
+      content: "🔍";
+      position: absolute;
+      left: -20px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 12px;
+    }
+    .left-nav-children { 
+      margin-left: 20px; 
+      margin-top: 4px;
+    }
+    .left-nav-toggle { 
+      display: inline-block; 
+      width: 16px; 
+      text-align: center; 
+      margin-right: 8px;
+      cursor: pointer;
+    }
+    .left-nav-toggle::before { content: "▶"; }
+    .left-nav-toggle.expanded::before { content: "▼"; }
+    .left-nav-title { font-size: 13px; line-height: 1.4; }
+    .left-nav-description { 
+      font-size: 11px; 
+      color: var(--muted); 
+      margin-top: 2px; 
+      line-height: 1.3;
+    }
+    
+    @media (max-width: 768px) {
+      .left-nav-sidebar { 
+        position: fixed; 
+        left: -260px; 
+        top: 0; 
+        height: 100vh; 
+        z-index: 1001;
+        transition: left 0.3s ease;
+      }
+      .left-nav-sidebar.open { left: 0; }
+      .main-content-pane { margin-left: 0; }
+      .wrap { padding: 8px 12px; }
+    }
     .settings-panel { position:absolute; top:50px; right:20px; background:#fff; border:1px solid var(--ring); border-radius:8px; padding:16px; box-shadow:0 4px 12px rgba(0,0,0,0.1); z-index:1000; min-width:280px; display:none; }
     .settings-panel.show { display:block; }
     .settings-group { margin-bottom:16px; }
@@ -181,19 +327,78 @@
     .level-content strong { font-weight: 600; }
     .level-content em { font-style: italic; }
     @media (max-width: 980px) { .row { grid-template-columns: 1fr; } }
+    
+    /* Wide layout optimizations */
+    .tree { max-width: none; }
+    .readbox { max-width: none; }
+    .chat-container { max-width: none; }
+    .level-content { max-width: none; }
+    
+    /* Comfortable reading width option */
+    .comfortable-width .readbox,
+    .comfortable-width .chat-message,
+    .comfortable-width .level-content {
+      max-width: 85ch;
+      margin: 0 auto;
+    }
+    
+    /* Ensure no internal max-widths constrain content */
+    .main-content-pane * {
+      max-width: none;
+    }
+    
+    .comfortable-width .main-content-pane .readbox,
+    .comfortable-width .main-content-pane .chat-message,
+    .comfortable-width .main-content-pane .level-content {
+      max-width: 85ch;
+      margin: 0 auto;
+    }
+    
+    .content-controls {
+      display: flex;
+      gap: 16px;
+      margin: 12px 0;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--ring);
+    }
+    
+    .control-checkbox {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--ink);
+      cursor: pointer;
+    }
+    
+    .control-checkbox input[type="checkbox"] {
+      margin: 0;
+      cursor: pointer;
+    }
+    
+    .btn.read {
+      background: #10b981;
+      color: white;
+      border-color: #10b981;
+    }
+    
+    .btn.read:hover {
+      background: #059669;
+      border-color: #059669;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="toolbar" style="justify-content:center; margin-bottom: 12px; position:relative;">
-      <div class="title" style="position:absolute; left:0;">Playbook</div>
-      <div class="flex" style="justify-content:center;">
+    <div class="toolbar" style="justify-content:space-between; margin-bottom: 8px; position:relative; padding: 0 4px;">
+      <div class="title" style="position:absolute; left:4px; z-index: 1;">Playbook</div>
+      <div class="flex" style="justify-content:center; flex: 1; margin: 0 120px;">
         <input id="inpTopic" type="text" placeholder="e.g., Neural Networks, Ramayana, Corporate Finance" style="margin-right: 8px; padding: 8px 12px; border: 1px solid var(--ring); border-radius: 6px; font-size: 14px; min-width: 300px;" />
         <button id="btnGen" class="btn">Learn</button>
       </div>
       
       <!-- Settings Panel -->
-      <div class="gear-icon" onclick="toggleSettings()" title="Settings">
+      <div class="gear-icon" onclick="toggleSettings()" title="Settings" style="position:absolute; right:4px; z-index: 1;">
         <svg viewBox="0 0 24 24" fill="currentColor">
           <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
         </svg>
@@ -215,6 +420,38 @@
             <input type="number" id="inpSections" min="2" max="12" value="5" style="width:60px;" />
             </div>
             </div>
+        
+        <div class="settings-group">
+          <label class="settings-label">Navigation</label>
+          <div class="settings-row">
+            <label>
+              <input type="radio" name="navMode" value="leftnav" id="navLeftNav" checked />
+              Left Nav
+            </label>
+          </div>
+          <div class="settings-row">
+            <label>
+              <input type="radio" name="navMode" value="inline" id="navInline" />
+              Inline Tree
+            </label>
+          </div>
+        </div>
+        
+        <div class="settings-group">
+          <label class="settings-label">Reading Width</label>
+          <div class="settings-row">
+            <label>
+              <input type="radio" name="readingWidth" value="full" id="readingFull" checked />
+              Full Width
+            </label>
+          </div>
+          <div class="settings-row">
+            <label>
+              <input type="radio" name="readingWidth" value="comfortable" id="readingComfortable" />
+              Comfortable
+            </label>
+          </div>
+        </div>
         
         <div class="settings-group">
           <label class="settings-label">Model Settings</label>
@@ -259,8 +496,8 @@
     <div class="space"></div>
 
     <!-- Result -->
-    <div class="card">
-      <div class="toolbar" style="justify-content:space-between;">
+    <div class="card" style="padding: 8px 12px;">
+      <div class="toolbar" style="justify-content:space-between; margin-bottom: 8px;">
         <div>
           <div class="muted">Result</div>
           <div id="resultTitle" style="font-weight:700; font-size:18px;">No topic yet</div>
@@ -269,9 +506,24 @@
       </div>
 
       <!-- Breadcrumb -->
-      <div id="breadcrumb" class="muted mono" style="margin-top:6px; overflow:auto; white-space:nowrap;"></div>
+      <div id="breadcrumb" class="muted mono" style="margin-top:4px; overflow:auto; white-space:nowrap;"></div>
 
+      <!-- Navigation Container -->
+      <div id="navContainer" class="nav-mode-leftnav">
+        <!-- Left Navigation Sidebar -->
+        <div id="leftNavSidebar" class="left-nav-sidebar">
+          <div class="left-nav-header">
+            <span class="left-nav-title">Navigation</span>
+            <button id="leftNavToggle" class="left-nav-toggle-btn" title="Collapse/Expand">◀</button>
+          </div>
+          <div id="leftNavTree" class="left-nav-tree"></div>
+        </div>
+        
+        <!-- Main Content Pane -->
+        <div id="mainContentPane" class="main-content-pane">
       <div id="tree" class="tree" style="margin-top:10px;"></div>
+        </div>
+      </div>
     </div>
 
     <div class="space"></div>
@@ -535,6 +787,11 @@ Requirements:
     const VISUALIZING = new Set();    // nodeId → in-flight visualization
     const VIZ_ELIG = new Map();        // nodeId → { ok: boolean, score: number, rationale: string }
     const VIZ_ELIG_CHECKING = new Set(); // nodeId → in-flight eligibility check
+    
+    // Navigation Mode State
+    let NAV_MODE = 'leftnav'; // 'leftnav' or 'inline'
+    let SELECTED_NODE_ID = null; // Currently selected node in left nav mode
+    let READING_WIDTH = 'full'; // 'full' or 'comfortable'
 
     // ----------------------- Notebook Schema -----------------------
     const NOTEBOOK_VERSION = "1.1.0";
@@ -631,7 +888,10 @@ Requirements:
         activeLevel,
         levelContent,
         summaries,
-        vizElig
+        vizElig,
+        navMode: NAV_MODE,
+        selectedNodeId: SELECTED_NODE_ID,
+        readingWidth: READING_WIDTH
       };
 
       return notebook;
@@ -769,8 +1029,47 @@ Requirements:
       const resultTitleEl = document.getElementById("resultTitle");
       if (resultTitleEl) resultTitleEl.textContent = notebook.config?.topic ? `TOC for: ${notebook.config.topic}` : "No topic yet";
 
+      // Restore navigation state
+      NAV_MODE = notebook.navMode || 'leftnav';
+      SELECTED_NODE_ID = notebook.selectedNodeId || null;
+      READING_WIDTH = notebook.readingWidth || 'full';
+      
+      // Update navigation mode UI
+      if (NAV_MODE === 'leftnav') {
+        $("navLeftNav").checked = true;
+        $("navInline").checked = false;
+      } else {
+        $("navLeftNav").checked = false;
+        $("navInline").checked = true;
+      }
+      
+      // Update reading width UI
+      if (READING_WIDTH === 'comfortable') {
+        $("readingComfortable").checked = true;
+        $("readingFull").checked = false;
+      } else {
+        $("readingComfortable").checked = false;
+        $("readingFull").checked = true;
+      }
+      
+      // Set navigation mode and reading width
+      setNavigationMode(NAV_MODE);
+      setReadingWidth(READING_WIDTH);
+
       // Re-render everything
-      renderTree(CURRENT_TOC, $("tree"));
+      if (NAV_MODE === 'leftnav') {
+        renderLeftNavTree();
+      } else {
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
+      }
       renderBreadcrumb();
 
       // Re-typeset MathJax after a short delay to ensure DOM is ready
@@ -1059,6 +1358,316 @@ Requirements:
       return path;
     }
 
+    // ----------------------- Navigation Mode Functions -----------------------
+    function setNavigationMode(mode) {
+      NAV_MODE = mode;
+      const navContainer = $("navContainer");
+      const leftNavSidebar = $("leftNavSidebar");
+      const mainContentPane = $("mainContentPane");
+      
+      if (mode === 'leftnav') {
+        navContainer.className = 'nav-mode-leftnav';
+        leftNavSidebar.style.display = 'block';
+        mainContentPane.style.display = 'block';
+        renderLeftNavTree();
+        if (SELECTED_NODE_ID) {
+          selectNodeInLeftNav(SELECTED_NODE_ID);
+        }
+      } else {
+        navContainer.className = 'nav-mode-inline';
+        leftNavSidebar.style.display = 'none';
+        mainContentPane.style.display = 'block';
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
+      }
+      
+      autosave();
+    }
+
+    function toggleLeftNav() {
+      const leftNavSidebar = $("leftNavSidebar");
+      if (leftNavSidebar) {
+        leftNavSidebar.classList.toggle('collapsed');
+        autosave();
+      }
+    }
+
+    function setReadingWidth(width) {
+      READING_WIDTH = width;
+      const body = document.body;
+      
+      if (width === 'comfortable') {
+        body.classList.add('comfortable-width');
+      } else {
+        body.classList.remove('comfortable-width');
+      }
+      
+      autosave();
+    }
+
+    function renderLeftNavTree() {
+      const leftNavTree = $("leftNavTree");
+      if (!leftNavTree || CURRENT_TOC.length === 0) return;
+      
+      leftNavTree.innerHTML = '';
+      const ul = document.createElement('ul');
+      ul.className = 'left-nav-tree';
+      
+      CURRENT_TOC.forEach(node => {
+        const li = createLeftNavNode(node, 0);
+        ul.appendChild(li);
+      });
+      
+      leftNavTree.appendChild(ul);
+      
+      // Auto-select first node if none selected
+      if (!SELECTED_NODE_ID && CURRENT_TOC.length > 0) {
+        const firstNode = findFirstSelectableNode(CURRENT_TOC);
+        if (firstNode) {
+          selectNodeInLeftNav(firstNode.id);
+        }
+      }
+    }
+
+    function createLeftNavNode(node, depth) {
+      const li = document.createElement('li');
+      const hasChildren = node.children && node.children.length > 0;
+      const isDeepDive = DEEP_DIVES.some(dd => dd.newChildIds.includes(node.id));
+      
+      const nodeDiv = document.createElement('div');
+      nodeDiv.className = `left-nav-node ${isDeepDive ? 'deep-dive' : ''}`;
+      nodeDiv.dataset.nodeId = node.id;
+      
+      if (hasChildren) {
+        const toggle = document.createElement('span');
+        toggle.className = 'left-nav-toggle';
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleNodeInLeftNav(node.id);
+        });
+        nodeDiv.appendChild(toggle);
+      } else {
+        const spacer = document.createElement('span');
+        spacer.style.width = '16px';
+        spacer.style.display = 'inline-block';
+        nodeDiv.appendChild(spacer);
+      }
+      
+      const title = document.createElement('span');
+      title.className = 'left-nav-title';
+      title.textContent = node.title;
+      nodeDiv.appendChild(title);
+      
+      if (node.description) {
+        const desc = document.createElement('div');
+        desc.className = 'left-nav-description';
+        desc.textContent = node.description;
+        nodeDiv.appendChild(desc);
+      }
+      
+      nodeDiv.addEventListener('click', () => {
+        selectNodeInLeftNav(node.id);
+        if (!hasChildren) {
+          // Auto-read content for leaf nodes
+          readSection(node, getNodePath(node.id));
+        }
+      });
+      
+      li.appendChild(nodeDiv);
+      
+      if (hasChildren) {
+        const childrenUl = document.createElement('ul');
+        childrenUl.className = 'left-nav-children';
+        childrenUl.style.display = EXPANDED.has(node.id) ? 'block' : 'none';
+        
+        node.children.forEach(child => {
+          const childLi = createLeftNavNode(child, depth + 1);
+          childrenUl.appendChild(childLi);
+        });
+        
+        li.appendChild(childrenUl);
+      }
+      
+      return li;
+    }
+
+    function toggleNodeInLeftNav(nodeId) {
+      const node = findNodeById(CURRENT_TOC, nodeId);
+      if (!node || !node.children) return;
+      
+      if (EXPANDED.has(nodeId)) {
+        EXPANDED.delete(nodeId);
+      } else {
+        EXPANDED.add(nodeId);
+      }
+      
+      renderLeftNavTree();
+      autosave();
+    }
+
+    function selectNodeInLeftNav(nodeId) {
+      SELECTED_NODE_ID = nodeId;
+      
+      // Update active state in left nav
+      document.querySelectorAll('.left-nav-node').forEach(node => {
+        node.classList.remove('active');
+      });
+      
+      const activeNode = document.querySelector(`[data-node-id="${nodeId}"]`);
+      if (activeNode) {
+        activeNode.classList.add('active');
+      }
+      
+      // Render content in main pane
+      renderSelectedNodeContent(nodeId);
+      autosave();
+    }
+
+    function renderSelectedNodeContent(nodeId) {
+      const mainContentPane = $("mainContentPane");
+      const node = findNodeById(CURRENT_TOC, nodeId);
+      if (!node) return;
+      
+      // Create content container
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'selected-node-content';
+      
+      // Add node title and description
+      const header = document.createElement('div');
+      header.className = 'node-header';
+      header.innerHTML = `
+        <h2>${node.title}</h2>
+        ${node.description ? `<p class="node-description">${node.description}</p>` : ''}
+      `;
+      contentDiv.appendChild(header);
+      
+      // Add control checkboxes
+      const controlsDiv = document.createElement('div');
+      controlsDiv.className = 'content-controls';
+      controlsDiv.innerHTML = `
+        <label class="control-checkbox">
+          <input type="checkbox" id="levelsToggle-${nodeId}" ${LEVELS_ENABLED.has(nodeId) ? 'checked' : ''}>
+          <span>Levels</span>
+        </label>
+        <label class="control-checkbox">
+          <input type="checkbox" id="deepDiveContext-${nodeId}" checked>
+          <span>Deep dive with context</span>
+        </label>
+      `;
+      contentDiv.appendChild(controlsDiv);
+      
+      // Add content if available
+      if (CONTENT.has(nodeId)) {
+        const readbox = document.createElement('div');
+        readbox.className = 'readbox';
+        readbox.innerHTML = renderMarkdown(CONTENT.get(nodeId));
+        contentDiv.appendChild(readbox);
+        typesetMath(readbox);
+      } else {
+        // Add read button
+        const readBtn = document.createElement('button');
+        readBtn.textContent = 'Read';
+        readBtn.className = 'btn';
+        readBtn.addEventListener('click', () => {
+          readSection(node, getNodePath(nodeId));
+        });
+        contentDiv.appendChild(readBtn);
+      }
+      
+      // Add chat interface
+      const chatContainer = document.createElement('div');
+      chatContainer.className = 'chat-container';
+      chatContainer.innerHTML = `
+        <div class="chat-header">Ask questions about ${node.title}</div>
+        <div class="chat-messages"></div>
+        <div class="chat-input-container">
+          <input type="text" class="chat-input" placeholder="Ask a question..." />
+          <button class="chat-send-btn">Send</button>
+        </div>
+      `;
+      contentDiv.appendChild(chatContainer);
+      
+      // Clear and populate main content pane
+      mainContentPane.innerHTML = '';
+      mainContentPane.appendChild(contentDiv);
+      
+      // Update left nav highlighting
+      updateLeftNavHighlighting(nodeId);
+      
+      // Initialize chat for this node
+      initializeChatForNode(nodeId, chatContainer);
+    }
+
+    function updateLeftNavHighlighting(nodeId) {
+      // Remove active class from all nodes
+      const allNodes = document.querySelectorAll('.left-nav-node');
+      allNodes.forEach(node => node.classList.remove('active'));
+      
+      // Add active class to selected node
+      const selectedNode = document.querySelector(`[data-node-id="${nodeId}"]`);
+      if (selectedNode) {
+        selectedNode.classList.add('active');
+      }
+    }
+
+    function findFirstSelectableNode(nodes) {
+      for (const node of nodes) {
+        if (!node.children || node.children.length === 0) {
+          return node;
+        }
+        const found = findFirstSelectableNode(node.children);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    function initializeChatForNode(nodeId, chatContainer) {
+      const chatInput = chatContainer.querySelector('.chat-input');
+      const chatSendBtn = chatContainer.querySelector('.chat-send-btn');
+      const messagesContainer = chatContainer.querySelector('.chat-messages');
+
+      // Initialize chat history if not exists
+      if (!CHAT_HISTORY.has(nodeId)) {
+        CHAT_HISTORY.set(nodeId, []);
+      }
+
+      // Load existing chat history
+      const chatHistory = CHAT_HISTORY.get(nodeId);
+      messagesContainer.innerHTML = '';
+      chatHistory.forEach(msg => {
+        const msgDiv = document.createElement("div");
+        msgDiv.className = `chat-message ${msg.role}`;
+        if (msg.role === 'assistant') {
+          msgDiv.innerHTML = renderMarkdown(msg.content);
+        } else {
+          msgDiv.textContent = msg.content;
+        }
+        messagesContainer.appendChild(msgDiv);
+      });
+
+      // Chat input handling
+      chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !chatSendBtn.disabled) {
+          e.preventDefault();
+          handleChatMessage(nodeId, chatInput, chatSendBtn, messagesContainer);
+        }
+      });
+
+      chatSendBtn.addEventListener('click', () => {
+        handleChatMessage(nodeId, chatInput, chatSendBtn, messagesContainer);
+      });
+
+      // Auto-scroll to bottom
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
     // ----------------------- Levels Management Functions -----------------------
     function toggleLevels(nodeId) {
       try {
@@ -1094,7 +1703,15 @@ Requirements:
         }
         
         autosave();
-        renderTree(CURRENT_TOC, $("tree"));
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
       } catch (error) {
         console.error("Error toggling levels:", error);
       }
@@ -1109,7 +1726,15 @@ Requirements:
           fetchLevelContent(nodeId, level);
         } else {
           // Just re-render
-          renderTree(CURRENT_TOC, $("tree"));
+          if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
         }
       } catch (error) {
         console.error("Error switching level:", error);
@@ -1121,7 +1746,11 @@ Requirements:
       if (LEVEL_READING.has(readingKey)) return;
       
       LEVEL_READING.add(readingKey);
-      renderTree(CURRENT_TOC, $("tree")); // Update UI to show "Loading..."
+      if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+} // Update UI to show "Loading..."
       
       try {
         const node = findNodeById(CURRENT_TOC, nodeId);
@@ -1158,7 +1787,15 @@ Requirements:
         showError(`Failed to load ${getLevelLabel(level)} content: ${e.message}`);
       } finally {
         LEVEL_READING.delete(readingKey);
-        renderTree(CURRENT_TOC, $("tree"));
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
       }
     }
 
@@ -1335,7 +1972,21 @@ Requirements:
         });
 
         // Re-render and scroll to Overview
-        renderTree(CURRENT_TOC, $("tree"));
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+          // Auto-select the new deep dive node
+          selectNodeInLeftNav(wrapper.children[0].id);
+        } else {
+          if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
+        }
         renderBreadcrumb();
         
         // Scroll to the wrapper (deep dive container) first, then to Overview
@@ -1425,7 +2076,15 @@ Requirements:
         VIZ_ELIG.set(nodeId, data);
         
         // Re-render to show/hide the visualize button
-        renderTree(CURRENT_TOC, $("tree"));
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
         
       } catch (e) {
         console.error("Eligibility check failed:", e);
@@ -1443,7 +2102,11 @@ Requirements:
       if (!node) return;
       
       VISUALIZING.add(nodeId);
-      renderTree(CURRENT_TOC, $("tree"));
+      if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
       
       try {
         const topic = $("inpTopic").value.trim();
@@ -1496,7 +2159,15 @@ Requirements:
         closeVisualizationModal();
       } finally {
         VISUALIZING.delete(nodeId);
-        renderTree(CURRENT_TOC, $("tree"));
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
       }
     }
     
@@ -1595,7 +2266,15 @@ Requirements:
           ), 1);
           
           // Re-render
-          renderTree(CURRENT_TOC, $("tree"));
+          if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
           renderBreadcrumb();
           autosave();
         }
@@ -1610,7 +2289,25 @@ Requirements:
     }
 
     // ----------------------- Rendering -----------------------
+    function getTreeContainer() {
+      if (NAV_MODE === 'leftnav') {
+        return $("leftNavTree");
+      } else {
+        return $("tree");
+      }
+    }
+
     function renderTree(nodes, container) {
+      // If no container specified, use the appropriate one based on navigation mode
+      if (!container) {
+        container = getTreeContainer();
+      }
+      
+      if (!container) {
+        console.warn("renderTree called with null container and no valid tree container found");
+        return;
+      }
+      
       container.innerHTML = "";
       if (!nodes || !Array.isArray(nodes) || nodes.length === 0) {
         container.innerHTML = '<div class="muted">No sections yet. Generate a TOC to see results.</div>';
@@ -1721,7 +2418,15 @@ Requirements:
         }
         if (hasChildren || EXP_CACHE.has(node.id)) {
           if (EXPANDED.has(node.id)) EXPANDED.delete(node.id); else EXPANDED.add(node.id);
-          renderTree(CURRENT_TOC, $("tree"));
+          if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
         }
       });
 
@@ -1969,7 +2674,12 @@ Requirements:
     // ----------------------- Video Suggestions -----------------------
     async function suggestVideos(node, path) {
       if (FETCHING_VIDEOS.has(node.id)) return;
-      FETCHING_VIDEOS.add(node.id); renderTree(CURRENT_TOC, $("tree"));
+      FETCHING_VIDEOS.add(node.id);
+      if (NAV_MODE === 'leftnav') {
+        renderLeftNavTree();
+        } else {
+        renderTree(CURRENT_TOC);
+      }
 
       try {
           const topic = $("inpTopic").value.trim();
@@ -1983,7 +2693,15 @@ Requirements:
         showError(e.message || String(e));
       } finally {
         FETCHING_VIDEOS.delete(node.id);
-        renderTree(CURRENT_TOC, $("tree"));
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
       }
     }
 
@@ -2011,7 +2729,11 @@ Requirements:
       visit(CURRENT_TOC);
       const topCountEl = document.getElementById("topCount");
       if (topCountEl) topCountEl.textContent = CURRENT_TOC.length;
-      renderTree(CURRENT_TOC, $("tree"));
+      if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
       renderBreadcrumb();
     }
 
@@ -2023,7 +2745,15 @@ Requirements:
       // already expanded?
       if (EXP_CACHE.has(node.id)) {
         EXPANDED.add(node.id);
-        renderTree(CURRENT_TOC, $("tree"));
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
         return;
       }
 
@@ -2083,7 +2813,23 @@ Requirements:
         } else {
         CONTENT.set(node.id, mock);
         }
-        renderTree(CURRENT_TOC, $("tree")); renderBreadcrumb();
+        if (NAV_MODE === 'leftnav') {
+          // In left nav mode, just update the selected node content
+          if (SELECTED_NODE_ID === node.id) {
+            renderSelectedNodeContent(node.id);
+          }
+        } else {
+          if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
+        }
+        renderBreadcrumb();
         autosave();
         return;
       }
@@ -2097,7 +2843,10 @@ Requirements:
 
       // Regular single content mode
       if (READING.has(node.id)) return;
-      READING.add(node.id); renderTree(CURRENT_TOC, $("tree"));
+      READING.add(node.id);
+      if (NAV_MODE === 'inline') {
+        renderTree(CURRENT_TOC);
+      }
 
       const topic = $("inpTopic").value.trim();
       const audience = $("inpAudience").value.trim() || "general";
@@ -2131,7 +2880,22 @@ Requirements:
         showError(e.message || String(e));
       } finally {
         READING.delete(node.id);
-        renderTree(CURRENT_TOC, $("tree"));
+        if (NAV_MODE === 'leftnav') {
+          // In left nav mode, just update the selected node content
+          if (SELECTED_NODE_ID === node.id) {
+            renderSelectedNodeContent(node.id);
+          }
+        } else {
+          if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
+        }
         renderBreadcrumb();
       }
     }
@@ -2175,7 +2939,26 @@ Requirements:
         CURRENT_TOC.forEach(n => EXPANDED.add(n.id));
         const topCountEl = document.getElementById("topCount");
         if (topCountEl) topCountEl.textContent = CURRENT_TOC.length;
-        renderTree(CURRENT_TOC, $("tree"));
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+          // Auto-select first node
+          if (CURRENT_TOC.length > 0) {
+            const firstNode = findFirstSelectableNode(CURRENT_TOC);
+            if (firstNode) {
+              selectNodeInLeftNav(firstNode.id);
+            }
+          }
+        } else {
+          if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+        } else {
+          if (NAV_MODE === 'leftnav') {
+  renderLeftNavTree();
+} else {
+  renderTree(CURRENT_TOC);
+}
+        }
+        }
         RUNS += 1; 
         const runCountEl = document.getElementById("runCount");
         if (runCountEl) runCountEl.textContent = RUNS;
@@ -2247,6 +3030,35 @@ Requirements:
       if (e.key === "Enter" && !$("btnGen").disabled) {
         e.preventDefault();
         generate();
+      }
+    });
+    
+    // Navigation mode toggle listeners
+    $("navLeftNav").addEventListener("change", (e) => {
+      if (e.target.checked) {
+        setNavigationMode('leftnav');
+      }
+    });
+    
+    // Left nav collapse toggle
+    $("leftNavToggle").addEventListener("click", toggleLeftNav);
+    
+    $("navInline").addEventListener("change", (e) => {
+      if (e.target.checked) {
+        setNavigationMode('inline');
+      }
+    });
+    
+    // Reading width toggle listeners
+    $("readingFull").addEventListener("change", (e) => {
+      if (e.target.checked) {
+        setReadingWidth('full');
+      }
+    });
+    
+    $("readingComfortable").addEventListener("change", (e) => {
+      if (e.target.checked) {
+        setReadingWidth('comfortable');
       }
     });
 
