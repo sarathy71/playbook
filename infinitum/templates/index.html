@@ -119,6 +119,7 @@
     .video-duration { font-size:11px; color:var(--muted); }
     .readbtn { font-size:12px; padding:4px 8px; border-radius:999px; border:1px solid var(--ring); background:#fff; cursor:pointer; }
     .readbtn[disabled] { opacity:.6; cursor:not-allowed; }
+  .readbtn.active-reading { background: #10b981; color: #fff; border-color: #10b981; }
     .selection-toolbar { position:fixed; z-index:1000; background:var(--card); border:1px solid var(--ring); border-radius:12px; padding:8px; box-shadow:0 8px 32px rgba(0,0,0,0.12); display:none; gap:8px; align-items:center; pointer-events:auto; }
     .selection-toolbar button { font-size:12px; padding:6px 12px; border-radius:8px; border:1px solid var(--ring); background:#fff; cursor:pointer; font-weight:500; }
     .selection-toolbar button:hover { background:#f8f9fa; }
@@ -609,6 +610,18 @@
       } catch (err) {
         console.log('typesetMath failed:', err);
         return Promise.resolve();
+      }
+    }
+
+    // Helper to notify that main content finished rendering (including MathJax typeset)
+    function emitContentRendered(nodeId) {
+      try {
+        const main = $("mainContentPane");
+        if (main) {
+          main.dispatchEvent(new CustomEvent('contentRendered', { detail: { nodeId } }));
+        }
+      } catch (e) {
+        // ignore
       }
     }
 
@@ -1146,18 +1159,32 @@ Requirements:
         return null;
       }
 
-      // Find the node ID by looking for the closest node container
+      // Find the node ID by looking for the closest node container.
+      // If no .node ancestor exists (selection inside the main read pane),
+      // fall back to the currently selected node (SELECTED_NODE_ID) so selections
+      // in the main content still show the toolbar.
       let nodeContainer = readbox || chatMessage;
-      while (nodeContainer && !nodeContainer.classList?.contains('node')) {
-        nodeContainer = nodeContainer.parentNode;
+      let foundNodeContainer = nodeContainer;
+      while (foundNodeContainer && !foundNodeContainer.classList?.contains('node')) {
+        foundNodeContainer = foundNodeContainer.parentNode;
       }
-      
-      if (!nodeContainer) {
-        return null;
+
+      // If we couldn't find a .node ancestor, but there's a selected node in the UI,
+      // treat the selection as belonging to the selected node (main pane content).
+      if (!foundNodeContainer) {
+        if (!SELECTED_NODE_ID) {
+          return null;
+        }
+        // Keep nodeContainer as the nearest content container (readbox/chat),
+        // and rely on SELECTED_NODE_ID as the node identifier.
+      } else {
+        nodeContainer = foundNodeContainer;
       }
 
       // Extract node ID from the node container (look for data attribute or parse from structure)
-      const nodeId = findNodeIdFromContainer(nodeContainer);
+      let nodeId = null;
+      if (nodeContainer) nodeId = findNodeIdFromContainer(nodeContainer);
+      if (!nodeId) nodeId = SELECTED_NODE_ID || null;
       if (!nodeId) return null;
 
       // Create snippet for anchor
@@ -1491,19 +1518,60 @@ Requirements:
           <span>Levels</span>
         </label>
         <label class="control-checkbox">
-          <input type="checkbox" id="deepDiveContext-${nodeId}" checked>
+          <input type="checkbox" id="deepDiveContext-${nodeId}" ${DEEP_WITH_CONTEXT.has(nodeId) ? 'checked' : ''}>
           <span>Deep dive with context</span>
         </label>
       `;
       contentDiv.appendChild(controlsDiv);
       
-      // Add content if available
-      if (CONTENT.has(nodeId)) {
+      // Add content or Levels UI
+      if (LEVELS_ENABLED.has(nodeId)) {
+        const activeLevel = ACTIVE_LEVEL.get(nodeId) || 5;
+
+        // Create tabs container
+        const tabsContainer = document.createElement('div');
+        tabsContainer.className = 'levels-tabs';
+        for (let level = 1; level <= 10; level++) {
+          const tab = document.createElement('button');
+          tab.className = 'level-tab';
+          if (level === activeLevel) tab.classList.add('active');
+          if (LEVEL_READING.has(`${nodeId}@${level}`)) tab.classList.add('loading');
+          tab.textContent = getLevelLabel(level);
+          tab.title = getLevelDescription(level);
+          tab.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            switchLevel(nodeId, level);
+          });
+          tabsContainer.appendChild(tab);
+        }
+        contentDiv.appendChild(tabsContainer);
+
+        const levelContentDiv = document.createElement('div');
+        levelContentDiv.className = 'level-content';
+        const levelContent = LEVEL_CONTENT.get(nodeId)?.get(activeLevel);
+        if (levelContent) {
+          levelContentDiv.innerHTML = renderMarkdown(levelContent);
+            // Delay typesetting slightly so MathJax can find newly inserted math
+            setTimeout(() => typesetMath(levelContentDiv).then(() => emitContentRendered(nodeId)).catch(() => emitContentRendered(nodeId)), 30);
+        } else if (LEVEL_READING.has(`${nodeId}@${activeLevel}`)) {
+          levelContentDiv.innerHTML = '<p><em>Loading...</em></p>';
+        } else {
+          levelContentDiv.innerHTML = `<p><em>Click to load ${getLevelLabel(activeLevel)} content</em></p>`;
+          // Allow clicking the prompt to start fetch
+          levelContentDiv.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            fetchLevelContent(nodeId, activeLevel);
+          });
+        }
+        contentDiv.appendChild(levelContentDiv);
+
+      } else if (CONTENT.has(nodeId)) {
         const readbox = document.createElement('div');
         readbox.className = 'readbox';
         readbox.innerHTML = renderMarkdown(CONTENT.get(nodeId));
         contentDiv.appendChild(readbox);
-        typesetMath(readbox);
+        // Delay typesetting to ensure DOM is ready for MathJax
+        setTimeout(() => typesetMath(readbox).then(() => emitContentRendered(nodeId)).catch(() => emitContentRendered(nodeId)), 30);
         
         // Add read button with "read" state
         const readBtn = document.createElement('button');
@@ -1520,17 +1588,42 @@ Requirements:
         readBtn.id = `readBtn-${nodeId}`;
         readBtn.textContent = 'Read';
         readBtn.className = 'btn';
-        readBtn.addEventListener('click', () => {
-          readSection(node, getNodePath(nodeId));
+        readBtn.addEventListener('click', async (ev) => {
+          ev?.stopPropagation();
+          readBtn.classList.add('active-reading');
+          readBtn.disabled = true;
+          try {
+            await readSection(node, getNodePath(nodeId));
+          } finally {
+            try {
+              const mainPane = $("mainContentPane");
+              await new Promise((resolve) => {
+                let done = false;
+                const handler = (e) => {
+                  if (e.detail && e.detail.nodeId === nodeId) {
+                    if (!done) { done = true; mainPane.removeEventListener('contentRendered', handler); resolve(); }
+                  }
+                };
+                mainPane.addEventListener('contentRendered', handler);
+                setTimeout(() => { if (!done) { done = true; mainPane.removeEventListener('contentRendered', handler); resolve(); } }, 3000);
+              });
+            } catch (e) {
+              // ignore
+            }
+            readBtn.classList.remove('active-reading');
+            readBtn.disabled = false;
+            if (NAV_MODE === 'leftnav') renderLeftNavTree(); else renderTree(CURRENT_TOC);
+          }
         });
         contentDiv.appendChild(readBtn);
       }
       
       // Add chat interface
+      const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 5)})` : "";
       const chatContainer = document.createElement('div');
       chatContainer.className = 'chat-container';
       chatContainer.innerHTML = `
-        <div class="chat-header">Ask questions about ${node.title}</div>
+        <div class="chat-header">Ask questions about ${node.title}${levelInfo}</div>
         <div class="chat-messages"></div>
         <div class="chat-input-container">
           <input type="text" class="chat-input" placeholder="Ask a question..." />
@@ -1542,6 +1635,24 @@ Requirements:
       // Clear and populate main content pane
       mainContentPane.innerHTML = '';
       mainContentPane.appendChild(contentDiv);
+      // Wire up the Levels checkbox in the main content (if present)
+      const levelsCheckboxMain = document.getElementById(`levelsToggle-${nodeId}`);
+      if (levelsCheckboxMain) {
+        levelsCheckboxMain.addEventListener('change', (ev) => {
+          ev.stopPropagation();
+          toggleLevels(nodeId);
+        });
+      }
+      
+      // Wire up the Deep-dive with context checkbox in the main content
+      const deepContextCheckboxMain = document.getElementById(`deepDiveContext-${nodeId}`);
+      if (deepContextCheckboxMain) {
+        deepContextCheckboxMain.addEventListener('change', (ev) => {
+          ev.stopPropagation();
+          if (deepContextCheckboxMain.checked) DEEP_WITH_CONTEXT.add(nodeId); else DEEP_WITH_CONTEXT.delete(nodeId);
+          autosave();
+        });
+      }
       
       // Update left nav highlighting
       updateLeftNavHighlighting(nodeId);
@@ -1609,16 +1720,24 @@ Requirements:
         messagesContainer.appendChild(msgDiv);
       });
 
-      // Chat input handling
+      // Chat input handling: read the question and call handleChatMessage with (node, path, question, chatContainer)
       chatInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !chatSendBtn.disabled) {
           e.preventDefault();
-          handleChatMessage(nodeId, chatInput, chatSendBtn, messagesContainer);
+          const question = chatInput.value.trim();
+          if (!question) return;
+          const node = findNodeById(CURRENT_TOC, nodeId);
+          const path = getNodePath(nodeId);
+          handleChatMessage(node, path, question, chatContainer);
         }
       });
 
       chatSendBtn.addEventListener('click', () => {
-        handleChatMessage(nodeId, chatInput, chatSendBtn, messagesContainer);
+        const question = chatInput.value.trim();
+        if (!question) return;
+        const node = findNodeById(CURRENT_TOC, nodeId);
+        const path = getNodePath(nodeId);
+        handleChatMessage(node, path, question, chatContainer);
       });
 
       // Auto-scroll to bottom
@@ -1660,14 +1779,16 @@ Requirements:
         }
         
         autosave();
+        // Re-render navigation tree or inline tree
         if (NAV_MODE === 'leftnav') {
           renderLeftNavTree();
         } else {
-          if (NAV_MODE === 'leftnav') {
-  renderLeftNavTree();
-} else {
-  renderTree(CURRENT_TOC);
-}
+          renderTree(CURRENT_TOC);
+        }
+
+        // If the toggled node is currently selected in the main pane, re-render its content
+        if (SELECTED_NODE_ID === nodeId) {
+          renderSelectedNodeContent(nodeId);
         }
       } catch (error) {
         console.error("Error toggling levels:", error);
@@ -1677,21 +1798,31 @@ Requirements:
     function switchLevel(nodeId, level) {
       try {
         ACTIVE_LEVEL.set(nodeId, level);
-        
-        // If content not cached, fetch it
-        if (!LEVEL_CONTENT.get(nodeId)?.has(level)) {
-          fetchLevelContent(nodeId, level);
-        } else {
-          // Just re-render
-          if (NAV_MODE === 'leftnav') {
+        // Immediately re-render so the selected tab is highlighted
+        if (NAV_MODE === 'leftnav') {
           renderLeftNavTree();
         } else {
-          if (NAV_MODE === 'leftnav') {
-  renderLeftNavTree();
-} else {
-  renderTree(CURRENT_TOC);
-}
+          renderTree(CURRENT_TOC);
         }
+        if (SELECTED_NODE_ID === nodeId) {
+          renderSelectedNodeContent(nodeId);
+        }
+
+        // If content not cached, mark as loading and fetch it so the content area shows Loading... immediately
+        if (!LEVEL_CONTENT.get(nodeId)?.has(level)) {
+          const readingKey = `${nodeId}@${level}`;
+          LEVEL_READING.add(readingKey);
+          // Re-render to show loading state
+          if (NAV_MODE === 'leftnav') {
+            renderLeftNavTree();
+          } else {
+            renderTree(CURRENT_TOC);
+          }
+          if (SELECTED_NODE_ID === nodeId) {
+            renderSelectedNodeContent(nodeId);
+          }
+          // Start the async fetch (fetchLevelContent will clear LEVEL_READING when done)
+          fetchLevelContent(nodeId, level);
         }
       } catch (error) {
         console.error("Error switching level:", error);
@@ -1699,10 +1830,10 @@ Requirements:
     }
 
     async function fetchLevelContent(nodeId, level) {
-      const readingKey = `${nodeId}@${level}`;
-      if (LEVEL_READING.has(readingKey)) return;
-      
-      LEVEL_READING.add(readingKey);
+  const readingKey = `${nodeId}@${level}`;
+  // If the key is already present it may have been pre-marked by switchLevel to show loading state.
+  // Ensure the key exists so UI shows a loading state, but do not early-return — proceed with the fetch.
+  if (!LEVEL_READING.has(readingKey)) LEVEL_READING.add(readingKey);
       if (NAV_MODE === 'leftnav') {
   renderLeftNavTree();
 } else {
@@ -1737,21 +1868,28 @@ Requirements:
           LEVEL_CONTENT.set(nodeId, new Map());
         }
         LEVEL_CONTENT.get(nodeId).set(level, data.content || "No content returned.");
-        
+
+        // Immediately re-render so selected pane shows the new content without extra clicks
+        if (SELECTED_NODE_ID === nodeId) {
+          renderSelectedNodeContent(nodeId);
+        }
+
         autosave();
       } catch (e) {
         console.error("Failed to fetch level content:", e);
         showError(`Failed to load ${getLevelLabel(level)} content: ${e.message}`);
       } finally {
         LEVEL_READING.delete(readingKey);
+        // Re-render tree to update loading states
         if (NAV_MODE === 'leftnav') {
           renderLeftNavTree();
         } else {
-          if (NAV_MODE === 'leftnav') {
-  renderLeftNavTree();
-} else {
-  renderTree(CURRENT_TOC);
-}
+          renderTree(CURRENT_TOC);
+        }
+
+        // If the fetched node is currently displayed in the main pane, re-render it to clear Loading...
+        if (SELECTED_NODE_ID === nodeId) {
+          renderSelectedNodeContent(nodeId);
         }
       }
     }
@@ -2318,9 +2456,36 @@ Requirements:
       const readBtn = txt.querySelector('button[data-read]');
       if (readBtn) {
         readBtn.addEventListener('click', async (ev) => {
-        ev.stopPropagation();
-        await readSection(node, path.concat({ id: node.id, title: node.title }));
-      });
+          ev.stopPropagation();
+          // Immediate visual feedback
+          readBtn.classList.add('active-reading');
+          readBtn.disabled = true;
+          try {
+            await readSection(node, path.concat({ id: node.id, title: node.title }));
+          } finally {
+            try {
+              if (SELECTED_NODE_ID === node.id) {
+                const mainPane = $("mainContentPane");
+                await new Promise((resolve) => {
+                  let done = false;
+                  const handler = (e) => {
+                    if (e.detail && e.detail.nodeId === node.id) {
+                      if (!done) { done = true; mainPane.removeEventListener('contentRendered', handler); resolve(); }
+                    }
+                  };
+                  mainPane.addEventListener('contentRendered', handler);
+                  setTimeout(() => { if (!done) { done = true; mainPane.removeEventListener('contentRendered', handler); resolve(); } }, 3000);
+                });
+              }
+            } catch (e) {
+              // ignore
+            }
+            // Re-enable and reset styling
+            readBtn.classList.remove('active-reading');
+            readBtn.disabled = false;
+            if (NAV_MODE === 'leftnav') renderLeftNavTree(); else renderTree(CURRENT_TOC);
+          }
+        });
       }
 
       // LEVELS checkbox (independent of expand/collapse)
@@ -2428,8 +2593,8 @@ Requirements:
         const levelContent = LEVEL_CONTENT.get(node.id)?.get(activeLevel);
         if (levelContent) {
           levelContentDiv.innerHTML = renderMarkdown(levelContent);
-          // Process math expressions with MathJax
-          typesetMath(levelContentDiv);
+          // Process math expressions with MathJax (slight delay to ensure DOM insertion)
+          setTimeout(() => typesetMath(levelContentDiv), 30);
         } else if (LEVEL_READING.has(`${node.id}@${activeLevel}`)) {
           levelContentDiv.innerHTML = "<p><em>Loading...</em></p>";
         } else {
@@ -2463,9 +2628,9 @@ Requirements:
           rb.innerHTML = renderMarkdown(fullContent);
         }
         
-        wrap.appendChild(rb);
-        // Process math expressions with MathJax
-        typesetMath(rb);
+  wrap.appendChild(rb);
+  // Process math expressions with MathJax (short delay)
+  setTimeout(() => typesetMath(rb), 30);
         }
 
       // Add chat interface (always show for nodes with content or levels enabled)
@@ -2499,8 +2664,8 @@ Requirements:
         });
         if (chatHistory.length > 0) {
           messagesContainer.scrollTop = messagesContainer.scrollHeight;
-          // Ensure any math in historical messages gets typeset
-          typesetMath(messagesContainer);
+          // Ensure any math in historical messages gets typeset (short delay)
+          setTimeout(() => typesetMath(messagesContainer), 30);
         }
 
         // Add chat event listeners
@@ -2613,7 +2778,8 @@ Requirements:
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
         CHAT_HISTORY.get(node.id).push({ role: 'assistant', content: answer, ts: new Date().toISOString() });
 
-        typesetMath(assistantMsgDiv);
+  // Delay MathJax typesetting slightly so new assistant message DOM is ready
+  setTimeout(() => typesetMath(assistantMsgDiv), 30);
         
         autosave();
       } catch (e) {
