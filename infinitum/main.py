@@ -99,6 +99,12 @@ def index():
     # Renders your existing HTML/JS, lightly edited to call this Flask API.
     return render_template("index.html", youtube_enabled=bool(YOUTUBE_API_KEY))
 
+
+@app.route('/notebook/<path:name>')
+def notebook_route(name):
+    # Serve the same SPA for notebook paths so the frontend can read the path and load the requested notebook.
+    return render_template("index.html", youtube_enabled=bool(YOUTUBE_API_KEY))
+
 @app.post("/api/toc")
 def api_toc():
     body = request.get_json(force=True, silent=True) or {}
@@ -502,32 +508,99 @@ Style guidelines:
 def api_notebook_save():
     """Save a notebook to server storage (optional cloud persistence)."""
     body = request.get_json(force=True, silent=True) or {}
+    NOTEBOOK_DIR = os.getenv("NOTEBOOK_DIR", "notebooks")
+    os.makedirs(NOTEBOOK_DIR, exist_ok=True)
+
     notebook_id = body.get("id") or str(uuid.uuid4())
+    name = (body.get("name") or "untitled").strip()
     notebook_data = body.get("notebook")
-    
+
     if not notebook_data:
         abort(400, "Notebook data is required.")
-    
-    # In a real implementation, you'd save to a database
-    # For now, we'll just return success with the ID
-    # You could implement file-based storage or database persistence here
-    
+
+    # Persist to a JSON file on the server. Filename is the notebook_id.json
+    path = os.path.join(NOTEBOOK_DIR, f"{notebook_id}.json")
+    now = datetime.datetime.utcnow().isoformat() + "Z"
+
+    # If file exists, preserve createdAt
+    created_at = now
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+                created_at = existing.get("createdAt", created_at)
+        except Exception:
+            created_at = now
+
+    envelope = {
+        "id": notebook_id,
+        "name": name,
+        "createdAt": created_at,
+        "updatedAt": now,
+        "notebook": notebook_data,
+    }
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(envelope, f, indent=2)
+    except Exception as e:
+        abort(500, f"Failed to save notebook: {e}")
+
     return jsonify({
         "id": notebook_id,
+        "name": name,
         "saved": True,
-        "message": "Notebook saved successfully"
+        "message": "Notebook saved successfully",
+        "updatedAt": now,
     })
 
 @app.get("/api/notebook/load")
 def api_notebook_load():
     """Load a notebook from server storage."""
+    NOTEBOOK_DIR = os.getenv("NOTEBOOK_DIR", "notebooks")
     notebook_id = request.args.get("id")
     if not notebook_id:
         abort(400, "Notebook ID is required.")
-    
-    # In a real implementation, you'd load from a database
-    # For now, return a 404 since we don't have persistence implemented
-    abort(404, "Notebook not found. Server-side persistence not yet implemented.")
+
+    path = os.path.join(NOTEBOOK_DIR, f"{notebook_id}.json")
+    if not os.path.exists(path):
+        abort(404, "Notebook not found")
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            envelope = json.load(f)
+    except Exception as e:
+        abort(500, f"Failed to read notebook: {e}")
+
+    return jsonify(envelope)
+
+
+@app.get("/api/notebook/list")
+def api_notebook_list():
+    """List notebooks saved on the server."""
+    NOTEBOOK_DIR = os.getenv("NOTEBOOK_DIR", "notebooks")
+    os.makedirs(NOTEBOOK_DIR, exist_ok=True)
+    items = []
+    for fname in os.listdir(NOTEBOOK_DIR):
+        if not fname.endswith('.json'):
+            continue
+        fpath = os.path.join(NOTEBOOK_DIR, fname)
+        try:
+            with open(fpath, 'r', encoding='utf-8') as f:
+                envelope = json.load(f)
+                items.append({
+                    'id': envelope.get('id'),
+                    'name': envelope.get('name'),
+                    'createdAt': envelope.get('createdAt'),
+                    'updatedAt': envelope.get('updatedAt'),
+                })
+        except Exception:
+            # Skip unreadable files
+            continue
+
+    # Sort by updatedAt desc
+    items.sort(key=lambda x: x.get('updatedAt') or '', reverse=True)
+    return jsonify({'notebooks': items})
 
 @app.route("/api/visualize/eligibility", methods=["POST"])
 def visualize_eligibility():

@@ -399,6 +399,17 @@
       background: #f5f5f5;
       border-color: #999;
     }
+
+    /* Toast styles */
+    .toast-container { position: fixed; left: 50%; transform: translateX(-50%); bottom: 24px; z-index: 2000; }
+    .toast { min-width: 180px; max-width: 640px; padding: 10px 14px; border-radius: 8px; background: #111827; color: #fff; box-shadow: 0 8px 24px rgba(0,0,0,0.12); opacity: 0; transition: opacity 0.2s ease, transform 0.2s ease; transform: translateY(6px); }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.success { background: #065f46; }
+    .toast.error { background: #b91c1c; }
+
+    /* Save button flash states */
+    .btn.save-success { background: #10b981 !important; border-color: #10b981 !important; }
+    .btn.save-error { background: #ef4444 !important; border-color: #ef4444 !important; }
     
     .actions-menu {
       position: absolute;
@@ -531,11 +542,12 @@
         <div class="settings-group">
           <label class="settings-label">Actions</label>
           <div class="settings-row">
-            <button id="btnCopy" onclick="copyJSON()">Copy JSON</button>
-            <button id="btnSave" onclick="saveNotebook()">Save Notebook</button>
+        <button id="btnCopy" onclick="copyJSON()">Copy JSON</button>
+        <button id="btnSave" onclick="saveNotebook()">Save Notebook</button>
+        <button id="btnNewNotebook" onclick="newNotebookInNewTab()">New Notebook</button>
         </div>
           <div class="settings-row">
-            <button id="btnOpen" onclick="openNotebook()">Open Notebook</button>
+                <button id="btnOpen" onclick="openNotebook()">Open Notebook</button>
             <button id="btnUndo" onclick="undoLastChange()" disabled>Undo</button>
         </div>
         </div>
@@ -572,6 +584,9 @@
     <div class="footer">Tip: Click a section, Read button, or Suggest videos button. Expansions call the LLM again with your current settings and keep ancestors expanded. After reading content, use the chat feature to ask questions about specific items. Select text in read content and use Ctrl+D to dive deeper.</div>
   </div>
 
+  <!-- Toast container -->
+  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
   <!-- Selection Toolbar -->
   <div id="selectionToolbar" class="selection-toolbar">
     <button id="btnDiveDeep" class="primary">Dive Deep</button>
@@ -588,6 +603,19 @@
       </div>
       <div id="modalBody">
         <div class="modal-loading">Generating visualization...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notebook Open Modal -->
+  <div id="notebookOpenModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Open Notebook</div>
+        <span class="modal-close" onclick="closeNotebookOpenModal()">&times;</span>
+      </div>
+      <div id="notebookListBody">
+        <div class="modal-loading">Loading notebooks...</div>
       </div>
     </div>
   </div>
@@ -818,6 +846,11 @@ Requirements:
   // the File System Access API). lastSavedFileName persists across sessions to suggest a name.
   let lastFileHandle = null;
   let lastSavedFileName = localStorage.getItem('lastSavedNotebookName') || null;
+  // Do not auto-use any previously saved notebook id on page load. Start fresh by default.
+  // LAST_SAVED_NOTEBOOK_ID will be set when the user explicitly loads a notebook or after a save.
+  let LAST_SAVED_NOTEBOOK_ID = null;
+  // Keep a snapshot of the last saved notebook (serialized) so we can detect unsaved changes
+  let LAST_SAVED_SNAPSHOT = null;
     let CURRENT_TOC = [];
     let BREAD = [];                 // [{id,title}, ...]
     const EXP_CACHE = new Map();    // nodeId -> children[]
@@ -1130,38 +1163,257 @@ Requirements:
     function saveNotebook() {
       try {
         const notebook = serializeNotebook();
-        const topic = notebook.config.topic || "topic";
-        const filename = `notebook-${slug(topic)}-${new Date().toISOString().slice(0, 10)}.tbnb`;
-        const jsonStr = JSON.stringify(notebook, null, 2);
-        blobDownload(filename, jsonStr, "application/json");
+        // If we've saved this notebook previously (server id known), auto-overwrite without prompting.
+        if (LAST_SAVED_NOTEBOOK_ID) {
+          // flash the save button as pending (optional UI)
+          flashSaveButton('pending');
+          fetch('/api/notebook/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: LAST_SAVED_NOTEBOOK_ID, name: localStorage.getItem('lastSavedNotebookName') || notebook.config.topic || 'untitled', notebook })
+          }).then(async (resp) => {
+            if (!resp.ok) throw new Error(await resp.text());
+            const data = await resp.json();
+            // update stored info
+            LAST_SAVED_NOTEBOOK_ID = data.id || LAST_SAVED_NOTEBOOK_ID;
+            localStorage.setItem('lastSavedNotebookId', LAST_SAVED_NOTEBOOK_ID);
+            localStorage.setItem('lastSavedNotebookName', data.name || notebook.config.topic || 'untitled');
+            console.log('Auto-saved notebook', data);
+            showToast('Saved Notebook', 'success');
+            flashSaveButton('success');
+            // Update URL to reflect saved notebook name
+            try {
+              const namePart = data.name ? encodeURIComponent(data.name) : encodeURIComponent(data.id);
+              const newPath = `/notebook/${namePart}`;
+              window.history.replaceState({}, '', newPath);
+            } catch (e) {
+              console.warn('Failed to update URL after auto-save', e);
+            }
+          }).catch((err) => {
+            console.error('Auto-save failed:', err);
+            showError('Save failed: ' + (err.message || String(err)));
+            showToast('Save failed: ' + (err.message || String(err)), 'error');
+            flashSaveButton('error');
+          });
+          return;
+        }
+
+            try {
+              // update last saved snapshot
+              LAST_SAVED_SNAPSHOT = JSON.stringify(serializeNotebook());
+            } catch (e) { /* ignore */ }
+        // New notebook: prompt user once for a name. Default to the topic.
+        let name = prompt('Notebook name (short):', notebook.config.topic || 'untitled');
+        if (name === null) return; // user cancelled
+        name = name.trim() || (notebook.config.topic || 'untitled');
+
+        // Send to server for persistent storage
+        // flash the save button as pending
+        flashSaveButton('pending');
+        fetch('/api/notebook/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, notebook })
+        }).then(async (resp) => {
+          if (!resp.ok) throw new Error(await resp.text());
+          const data = await resp.json();
+          // remember last saved id/name locally for UX so next saves auto-overwrite
+          LAST_SAVED_NOTEBOOK_ID = data.id;
+          localStorage.setItem('lastSavedNotebookId', data.id);
+          localStorage.setItem('lastSavedNotebookName', data.name || name);
+          console.log('Saved notebook', data);
+          showToast('Saved Notebook', 'success');
+          flashSaveButton('success');
+          try {
+            // update last saved snapshot
+            LAST_SAVED_SNAPSHOT = JSON.stringify(serializeNotebook());
+          } catch (e) { /* ignore */ }
+          // Update URL to reflect saved notebook name
+          try {
+            const namePart = data.name ? encodeURIComponent(data.name) : encodeURIComponent(data.id);
+            const newPath = `/notebook/${namePart}`;
+            window.history.replaceState({}, '', newPath);
+          } catch (e) {
+            console.warn('Failed to update URL after save', e);
+          }
+        }).catch((err) => {
+          console.error('Save failed:', err);
+          showError('Save failed: ' + (err.message || String(err)));
+          showToast('Save failed: ' + (err.message || String(err)), 'error');
+          flashSaveButton('error');
+        });
       } catch (e) {
         console.error("Failed to save notebook:", e);
         showError(`Failed to save notebook: ${e.message}`);
       }
     }
 
-    function openNotebook() {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".tbnb,.json";
-      input.onchange = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+    // Return true if current notebook state differs from last saved snapshot
+    function isNotebookDirty() {
+      try {
+        const current = JSON.stringify(serializeNotebook());
+        if (!LAST_SAVED_SNAPSHOT) return true; // never saved
+        return current !== LAST_SAVED_SNAPSHOT;
+      } catch (e) {
+        return true;
+      }
+    }
 
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          try {
-            const notebook = JSON.parse(e.target.result);
-            deserializeNotebook(notebook);
-            showError("");
-          } catch (err) {
-            console.error("Failed to load notebook:", err);
-            showError(`Failed to load notebook: ${err.message}`);
-          }
-        };
-        reader.readAsText(file);
-      };
-      input.click();
+    // Warn when closing the tab/window if there are unsaved changes
+    window.addEventListener('beforeunload', (e) => {
+      try {
+        if (isNotebookDirty()) {
+          const confirmationMessage = 'You have unsaved changes. Are you sure you want to leave?';
+          e.returnValue = confirmationMessage; // Gecko, Trident, Chrome 34+
+          return confirmationMessage; // Gecko, WebKit, Chrome <34
+        }
+      } catch (err) {
+        // ignore
+      }
+    });
+
+    // Open a new tab with a fresh notebook (root path). Does not close current tab.
+    function newNotebookInNewTab() {
+      try {
+        window.open('/', '_blank');
+      } catch (e) {
+        console.error('Failed to open new tab for new notebook', e);
+        showError('Failed to open new notebook: ' + (e.message || String(e)));
+      }
+    }
+
+    // Toast helper
+    function showToast(message, type = 'success', timeout = 2500) {
+      try {
+        const container = $('toastContainer');
+        if (!container) return;
+        const t = document.createElement('div');
+        t.className = `toast ${type === 'error' ? 'error' : 'success'}`;
+        t.textContent = message;
+        container.appendChild(t);
+        // Allow CSS animation
+        setTimeout(() => t.classList.add('show'), 10);
+        setTimeout(() => {
+          t.classList.remove('show');
+          setTimeout(() => t.remove(), 300);
+        }, timeout);
+      } catch (e) { console.error('showToast failed', e); }
+    }
+
+    // Flash Save button: 'success' (green), 'error' (red), 'pending' (neutral)
+    function flashSaveButton(state) {
+      const btn = document.getElementById('btnSave');
+      if (!btn) return;
+      // Clear previous classes
+      btn.classList.remove('save-success', 'save-error');
+      if (state === 'success') {
+        btn.classList.add('save-success');
+        setTimeout(() => btn.classList.remove('save-success'), 1000);
+      } else if (state === 'error') {
+        btn.classList.add('save-error');
+        setTimeout(() => btn.classList.remove('save-error'), 1000);
+      } else {
+        // pending — no-op or you could add a spinner
+      }
+    }
+
+    function openNotebook() {
+      // Open server-backed notebook list modal
+      const modal = $('notebookOpenModal');
+      const body = $('notebookListBody');
+      body.innerHTML = '<div class="modal-loading">Loading notebooks...</div>';
+      modal.style.display = 'block';
+
+      fetch('/api/notebook/list').then(async (resp) => {
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        const list = data.notebooks || [];
+        if (list.length === 0) {
+          body.innerHTML = '<div class="muted">No notebooks found on the server.</div>';
+          return;
+        }
+
+        const ul = document.createElement('div');
+        ul.style.display = 'grid';
+        ul.style.gap = '8px';
+
+        list.forEach(nb => {
+          const row = document.createElement('div');
+          row.style.display = 'flex';
+          row.style.justifyContent = 'space-between';
+          row.style.alignItems = 'center';
+          row.style.padding = '6px 8px';
+          row.style.border = '1px solid var(--ring)';
+          row.style.borderRadius = '8px';
+
+          const left = document.createElement('div');
+          left.innerHTML = `<div style="font-weight:600">${escapeHtml(nb.name || nb.id)}</div>
+                            <div style="font-size:12px; color:var(--muted)">id: ${nb.id} — updated: ${nb.updatedAt || ''}</div>`;
+
+          const actions = document.createElement('div');
+          const loadBtn = document.createElement('button');
+          loadBtn.className = 'btn btn-ghost';
+          loadBtn.textContent = 'Load';
+          loadBtn.addEventListener('click', () => {
+            loadNotebookById(nb.id);
+          });
+
+          actions.appendChild(loadBtn);
+          row.appendChild(left);
+          row.appendChild(actions);
+          ul.appendChild(row);
+        });
+
+        body.innerHTML = '';
+        body.appendChild(ul);
+      }).catch((err) => {
+        console.error('Failed to list notebooks:', err);
+        body.innerHTML = `<div class="muted danger">Failed to list notebooks: ${escapeHtml(err.message || String(err))}</div>`;
+      });
+    }
+
+    function closeNotebookOpenModal() {
+      const modal = $('notebookOpenModal');
+      modal.style.display = 'none';
+    }
+
+    async function loadNotebookById(id) {
+      try {
+        const resp = await fetch(`/api/notebook/load?id=${encodeURIComponent(id)}`);
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        if (!data.notebook) throw new Error('Malformed notebook envelope from server');
+  deserializeNotebook(data.notebook);
+  // Remember that this notebook is backed on the server so future saves overwrite it
+  LAST_SAVED_NOTEBOOK_ID = data.id || LAST_SAVED_NOTEBOOK_ID;
+  if (data.name) localStorage.setItem('lastSavedNotebookName', data.name);
+  if (data.id) localStorage.setItem('lastSavedNotebookId', data.id);
+  closeNotebookOpenModal();
+  console.log('Loaded notebook', { id: data.id, name: data.name });
+        // Update URL to reflect loaded notebook name
+        try {
+          const namePart = data.name ? encodeURIComponent(data.name) : encodeURIComponent(data.id);
+          const newPath = `/notebook/${namePart}`;
+          window.history.replaceState({}, '', newPath);
+        } catch (e) {
+          console.warn('Failed to update URL after loading notebook', e);
+        }
+        try {
+          // mark as saved (so closing won't prompt immediately)
+          LAST_SAVED_SNAPSHOT = JSON.stringify(serializeNotebook());
+        } catch (e) { /* ignore */ }
+      } catch (e) {
+        console.error('Failed to load notebook:', e);
+        showError('Failed to load notebook: ' + (e.message || String(e)));
+      }
+    }
+
+    // small helper to escape HTML when injecting server content
+    function escapeHtml(s) {
+      if (!s) return '';
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c];
+      });
     }
 
     function autosave() {
@@ -3215,10 +3467,8 @@ Requirements:
     }
 
     // ----------------------- Hooks -----------------------
-    $("btnGen").addEventListener("click", generate);
-    $("btnSave").addEventListener("click", saveNotebook);
-    $("btnOpen").addEventListener("click", openNotebook);
-    $("btnCopy").addEventListener("click", copyJSON);
+  $("btnGen").addEventListener("click", generate);
+  $("btnCopy").addEventListener("click", copyJSON);
     $("chkLive").addEventListener("change", (e) => { 
       LIVE = e.target.checked; 
       // Update status display if it exists
@@ -3351,18 +3601,48 @@ Requirements:
     });
 
     // Initialize autosave on page load
-    document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("DOMContentLoaded", async () => {
       try {
         // Set up event listeners for settings panel inputs
         document.getElementById('inpTemp').addEventListener('input', (e) => {
           document.getElementById('tempVal').textContent = parseFloat(e.target.value).toFixed(2);
         });
 
-        // Try to load autosave on startup
-        if (!loadAutosave()) {
-          // If no autosave was loaded, set up autosave for future changes
-          autosave();
-        }
+            // Do NOT load autosave on startup. Start a fresh notebook by default.
+            // Always enable autosave for future changes.
+            autosave();
+            try {
+              LAST_SAVED_SNAPSHOT = JSON.stringify(serializeNotebook());
+            } catch (e) { /* ignore */ }
+
+            // If URL contains /notebook/<name>, attempt to find and load that notebook from the server.
+            try {
+              const path = window.location.pathname || '';
+              const m = path.match(/^\/notebook\/(.+)$/);
+              if (m) {
+                const requested = decodeURIComponent(m[1]);
+                // Fetch list and find matching notebook by name, slug(name), or id
+                try {
+                  const resp = await fetch('/api/notebook/list');
+                  if (resp.ok) {
+                    const data = await resp.json();
+                    const notebooks = data.notebooks || [];
+                    const requestedSlug = slug(requested);
+                    const found = notebooks.find(nb => nb.id === requested || nb.name === requested || slug(nb.name || '') === requestedSlug);
+                    if (found) {
+                      // load by id
+                      await loadNotebookById(found.id);
+                    } else {
+                      console.warn('Notebook not found for path:', requested);
+                    }
+                  }
+                } catch (e) {
+                  console.warn('Failed to load notebook from URL:', e);
+                }
+              }
+            } catch (e) {
+              console.warn('URL notebook check failed:', e);
+            }
         updateUndoButton();
         console.log("Topic Browser initialized successfully");
       } catch (error) {
