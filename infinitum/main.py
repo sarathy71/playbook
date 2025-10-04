@@ -260,7 +260,9 @@ def api_chat():
 
     system = (
         "Answer strictly using the provided section context unless the question is generic. "
-        "Be concise and clear. Use Markdown and LaTeX for math when appropriate." + level_instruction
+        "Be concise and clear. Use Markdown and LaTeX for math when appropriate. "
+        "For math expressions, use $...$ for inline math or $$...$$ for display math. "
+        "Do not surround TeX with normal parentheses or brackets, and do not put math inside code fences." + level_instruction
     )
 
     messages = [
@@ -412,6 +414,8 @@ TocNode = {{
 Style guidelines:
 - shortName should be a concise noun-phrase (e.g., "Activation Functions")
 - Overview readContent should be comprehensive (200-300 words) with Markdown and LaTeX
+- For math expressions, use $...$ for inline math or $$...$$ for display math
+- Do not surround TeX with normal parentheses or brackets, and do not put math inside code fences
 """.strip()
 
     else:
@@ -465,6 +469,8 @@ Style guidelines:
 - Other children should have concise titles and brief descriptions only
 - Focus on the specific selection, not general background
 - Maintain the audience level and tone
+- For math expressions, use $...$ for inline math or $$...$$ for display math
+- Do not surround TeX with normal parentheses or brackets, and do not put math inside code fences
 """.strip()
 
     parsed, raw = _chat_json(model, temperature, system_prompt, user_prompt)

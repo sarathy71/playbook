@@ -14,7 +14,18 @@
         processEnvironments: true
       },
       options: {
-        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']
+        enableMenu: false,
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
+        ignoreHtmlClass: 'tex2jax_ignore',
+        processHtmlClass: 'tex2jax_process'
+      },
+      chtml: {
+        displayAlign: 'left',
+        displayIndent: '0'
+      },
+      svg: {
+        displayAlign: 'left',
+        displayIndent: '0'
       }
     };
   </script>
@@ -56,8 +67,8 @@
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
     .footer { color:var(--muted); font-size:12px; }
     .readbox { margin-top:8px; background:#fafafa; border:1px solid var(--ring); border-radius:12px; padding:10px; }
-    .readbox .MathJax { font-size: 1.1em; }
-    .readbox .MathJax_Display { margin: 0.5em 0; }
+    .readbox .MathJax { font-size: 1.1em; user-select: text; -webkit-user-select: text; -moz-user-select: text; -ms-user-select: text; }
+    .readbox .MathJax_Display { margin: 0.5em 0; user-select: text; -webkit-user-select: text; -moz-user-select: text; -ms-user-select: text; }
     .readbox h1, .readbox h2, .readbox h3, .readbox h4, .readbox h5, .readbox h6 { margin: 0.5em 0 0.3em 0; font-weight: 600; }
     .readbox h1 { font-size: 1.3em; }
     .readbox h2 { font-size: 1.2em; }
@@ -90,6 +101,8 @@
     .chat-message blockquote { border-left: 2px solid #ccc; padding-left: 0.8em; margin: 0.3em 0; color: var(--muted); }
     .chat-message strong { font-weight: 600; }
     .chat-message em { font-style: italic; }
+    .chat-message .MathJax { user-select: text; -webkit-user-select: text; -moz-user-select: text; -ms-user-select: text; }
+    .chat-message .MathJax_Display { user-select: text; -webkit-user-select: text; -moz-user-select: text; -ms-user-select: text; }
     .chat-input-container { display:flex; gap:8px; padding:8px; border-top:1px solid var(--ring); }
     .chat-input { flex:1; padding:8px 12px; border:1px solid var(--ring); border-radius:20px; outline:none; font-size:13px; }
     .chat-send-btn { padding:8px 16px; background:var(--accent); color:#fff; border:none; border-radius:20px; cursor:pointer; font-size:12px; font-weight:600; }
@@ -152,8 +165,8 @@
     .level-tab.active { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
     .level-tab.loading { opacity:0.6; cursor:not-allowed; }
     .level-content { margin-top:8px; background:#fafafa; border:1px solid var(--ring); border-radius:12px; padding:10px; }
-    .level-content .MathJax { font-size: 1.1em; }
-    .level-content .MathJax_Display { margin: 0.5em 0; }
+    .level-content .MathJax { font-size: 1.1em; user-select: text; -webkit-user-select: text; -moz-user-select: text; -ms-user-select: text; }
+    .level-content .MathJax_Display { margin: 0.5em 0; user-select: text; -webkit-user-select: text; -moz-user-select: text; -ms-user-select: text; }
     .level-content h1, .level-content h2, .level-content h3, .level-content h4, .level-content h5, .level-content h6 { margin: 0.5em 0 0.3em 0; font-weight: 600; }
     .level-content h1 { font-size: 1.3em; }
     .level-content h2 { font-size: 1.2em; }
@@ -311,12 +324,52 @@
       });
     }
 
+    // Normalize math delimiters before rendering
+    function normalizeMathDelimiters(text) {
+      if (!text) return "";
+      
+      // Convert "( \ ... )" patterns to \(...\)
+      text = text.replace(/\(\s*\\([^)]+)\s*\)/g, '\\($1\\)');
+      
+      // Convert standalone "[ \n ... \n ]" blocks to $$...$$
+      text = text.replace(/\[\s*\n([\s\S]*?)\n\s*\]/g, (match, content) => {
+        // Check if content looks like math (contains common LaTeX commands)
+        if (/\\[a-zA-Z]+|\\[(){}[\]]|\\frac|\\sum|\\int|\\alpha|\\beta|\\gamma|\\delta|\\epsilon|\\pi|\\sigma|\\tau|\\phi|\\omega/.test(content)) {
+          return `$$${content}$$`;
+        }
+        return match; // Keep original if not math
+      });
+      
+      // Remove code fences that only wrap math
+      text = text.replace(/```[\s\S]*?```/g, (match) => {
+        const content = match.replace(/```/g, '').trim();
+        // If content is mostly math, remove the fences
+        if (/\\[a-zA-Z]+|\\[(){}[\]]|\\frac|\\sum|\\int|\\alpha|\\beta|\\gamma|\\delta|\\epsilon|\\pi|\\sigma|\\tau|\\phi|\\omega/.test(content)) {
+          return content;
+        }
+        return match;
+      });
+      
+      // Remove backticks that only wrap math
+      text = text.replace(/`([^`]+)`/g, (match, content) => {
+        // If content is math, remove the backticks
+        if (/\\[a-zA-Z]+|\\[(){}[\]]|\\frac|\\sum|\\int|\\alpha|\\beta|\\gamma|\\delta|\\epsilon|\\pi|\\sigma|\\tau|\\phi|\\omega/.test(content)) {
+          return content;
+        }
+        return match;
+      });
+      
+      return text;
+    }
+
     function renderMarkdown(markdownText) {
       if (typeof marked === 'undefined') {
         // Fallback if marked.js isn't loaded
         return markdownText.replace(/\n/g, '<br>');
       }
-      return marked.parse(markdownText);
+      // Normalize math delimiters before parsing
+      const normalizedText = normalizeMathDelimiters(markdownText);
+      return marked.parse(normalizedText);
     }
 
     // Robust MathJax typesetting helper: if MathJax isn't loaded yet, queue elements
@@ -331,8 +384,13 @@
           : (Array.isArray(el) ? el : [el]);
 
         if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
-          if (els) return window.MathJax.typesetPromise(els).catch((err) => console.log('MathJax typeset error:', err));
-          return window.MathJax.typesetPromise().catch((err) => console.log('MathJax typeset error:', err));
+          const promise = els ? 
+            window.MathJax.typesetPromise(els).catch((err) => console.log('MathJax typeset error:', err)) :
+            window.MathJax.typesetPromise().catch((err) => console.log('MathJax typeset error:', err));
+          
+          // After typesetting, make math elements selectable
+          promise.then(() => makeMathSelectable(els));
+          return promise;
         }
 
         // Queue the request for later. Use a global queue array on window.
@@ -345,6 +403,49 @@
       }
     }
 
+    // Make MathJax elements selectable by adding click handlers and visual cues
+    function makeMathSelectable(els) {
+      if (!els) {
+        els = document.querySelectorAll('.MathJax, .MathJax_Display');
+      } else if (!Array.isArray(els)) {
+        els = [els];
+      }
+
+      els.forEach(el => {
+        if (!el) return;
+        
+        // Find all MathJax elements within this container
+        const mathElements = el.querySelectorAll('.MathJax, .MathJax_Display');
+        mathElements.forEach(mathEl => {
+          // Add visual cue that math is selectable
+          mathEl.style.cursor = 'text';
+          mathEl.style.userSelect = 'text';
+          mathEl.style.webkitUserSelect = 'text';
+          mathEl.style.mozUserSelect = 'text';
+          mathEl.style.msUserSelect = 'text';
+          
+          // Add title with LaTeX source if available
+          const mathNode = mathEl.querySelector('script[type="math/tex"], script[type="math/tex; mode=display"]');
+          if (mathNode) {
+            mathEl.title = `LaTeX: ${mathNode.textContent}`;
+          }
+          
+          // Add click handler to select the LaTeX source
+          mathEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (mathNode) {
+              // Try to select the LaTeX text
+              const range = document.createRange();
+              range.selectNodeContents(mathNode);
+              const selection = window.getSelection();
+              selection.removeAllRanges();
+              selection.addRange(range);
+            }
+          });
+        });
+      });
+    }
+
     // When MathJax script finishes loading, flush any queued typeset requests.
     (function flushMathJaxQueueOnLoad() {
       const script = document.getElementById('MathJax-script');
@@ -354,8 +455,10 @@
           const q = window._mj_queue || [];
           for (const els of q) {
             try {
-              if (els) window.MathJax.typesetPromise(els).catch((e) => console.log('MathJax typeset error:', e));
-              else window.MathJax.typesetPromise().catch((e) => console.log('MathJax typeset error:', e));
+              const promise = els ? 
+                window.MathJax.typesetPromise(els).catch((e) => console.log('MathJax typeset error:', e)) :
+                window.MathJax.typesetPromise().catch((e) => console.log('MathJax typeset error:', e));
+              promise.then(() => makeMathSelectable(els));
             } catch (e) {
               console.log('Error flushing MathJax queue:', e);
             }
@@ -1201,7 +1304,9 @@ Requirements:
 
         // Set content only for the first child (Overview)
         if (wrapper.children.length > 0 && wrapper.children[0].readContent) {
-          CONTENT.set(wrapper.children[0].id, wrapper.children[0].readContent);
+          // Normalize math delimiters in the deep dive content
+          const normalizedContent = normalizeMathDelimiters(wrapper.children[0].readContent);
+          CONTENT.set(wrapper.children[0].id, normalizedContent);
           
           // Initialize chat history for Overview with system message
           const overviewId = wrapper.children[0].id;
