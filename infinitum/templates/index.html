@@ -1212,18 +1212,32 @@ Requirements:
         return null;
       }
 
-      // Find the node ID by looking for the closest node container
+      // Find the node ID by looking for the closest node container.
+      // If no .node ancestor exists (selection inside the main read pane),
+      // fall back to the currently selected node (SELECTED_NODE_ID) so selections
+      // in the main content still show the toolbar.
       let nodeContainer = readbox || chatMessage;
-      while (nodeContainer && !nodeContainer.classList?.contains('node')) {
-        nodeContainer = nodeContainer.parentNode;
+      let foundNodeContainer = nodeContainer;
+      while (foundNodeContainer && !foundNodeContainer.classList?.contains('node')) {
+        foundNodeContainer = foundNodeContainer.parentNode;
       }
-      
-      if (!nodeContainer) {
-        return null;
+
+      // If we couldn't find a .node ancestor, but there's a selected node in the UI,
+      // treat the selection as belonging to the selected node (main pane content).
+      if (!foundNodeContainer) {
+        if (!SELECTED_NODE_ID) {
+          return null;
+        }
+        // Keep nodeContainer as the nearest content container (readbox/chat),
+        // and rely on SELECTED_NODE_ID as the node identifier.
+      } else {
+        nodeContainer = foundNodeContainer;
       }
 
       // Extract node ID from the node container (look for data attribute or parse from structure)
-      const nodeId = findNodeIdFromContainer(nodeContainer);
+      let nodeId = null;
+      if (nodeContainer) nodeId = findNodeIdFromContainer(nodeContainer);
+      if (!nodeId) nodeId = SELECTED_NODE_ID || null;
       if (!nodeId) return null;
 
       // Create snippet for anchor
