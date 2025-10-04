@@ -422,6 +422,7 @@ Requirements:
     const FETCHING_VIDEOS = new Set(); // nodeId -> in-flight video fetch
     const RUNS_HISTORY = [];        // [{ts, model, temperature, tokens, requestSummary}]
     const DEEP_DIVES = [];          // [{nodeId, selection: {text, snippet, offsets}, createdAt, newChildIds}]
+    const DEEP_WITH_CONTEXT = new Set(); // nodeId -> whether deep-dive should include parent/context
     const UNDO_STACK = [];          // [{type, parentId, childrenIds, timestamp}]
     const LEVELS_ENABLED = new Set(); // nodeId → whether Levels UI is enabled
     const ACTIVE_LEVEL = new Map();   // nodeId → active level (1-10)
@@ -494,6 +495,8 @@ Requirements:
         vizElig[nodeId] = eligibility;
       }
 
+      const deepWithContext = Array.from(DEEP_WITH_CONTEXT);
+
       const notebook = {
         meta: {
           version: NOTEBOOK_VERSION,
@@ -520,6 +523,7 @@ Requirements:
         videos,
         runs: RUNS_HISTORY,
         deepDives: DEEP_DIVES,
+  deepWithContext,
         levelsEnabled,
         activeLevel,
         levelContent,
@@ -594,6 +598,14 @@ Requirements:
       if (notebook.vizElig) {
         for (const [nodeId, eligibility] of Object.entries(notebook.vizElig)) {
           VIZ_ELIG.set(nodeId, eligibility);
+        }
+      }
+
+      // Restore deep-dive context toggles
+      DEEP_WITH_CONTEXT.clear();
+      if (notebook.deepWithContext) {
+        for (const nodeId of notebook.deepWithContext) {
+          DEEP_WITH_CONTEXT.add(nodeId);
         }
       }
       
@@ -1114,6 +1126,7 @@ Requirements:
             temperature,
             node: { id: node.id, title: node.title },
             path,
+            with_context: DEEP_WITH_CONTEXT.has(node.id),
             selection: {
               text: selectionInfo.text,
               sourceNodeId: nodeId,
@@ -1531,6 +1544,9 @@ Requirements:
              Levels
            </label>
            ` : ''}
+           <label class="deepdive-context-toggle" style="margin-left:8px; font-size:12px; display:inline-flex; align-items:center;" data-deepcontext="${node.id}">
+             <input type="checkbox" ${DEEP_WITH_CONTEXT.has(node.id) ? 'checked' : ''} style="margin-right:6px;">Deep dive with context
+           </label>
          </div>` +
         (node.description ? `<div class="desc">${node.description}</div>` : "") +
         `<div class="id">${node.id}</div>`;
@@ -1563,6 +1579,21 @@ Requirements:
           ev.stopPropagation();
           // Don't toggle here since the checkbox change event will handle it
         });
+      }
+
+      // Deep-dive with context toggle (independent of expand/collapse)
+      const deepContextToggle = txt.querySelector('label[data-deepcontext]');
+      if (deepContextToggle) {
+        const checkbox = deepContextToggle.querySelector('input[type="checkbox"]');
+        if (checkbox) {
+          checkbox.addEventListener('change', (ev) => {
+            ev.stopPropagation();
+            if (checkbox.checked) DEEP_WITH_CONTEXT.add(node.id); else DEEP_WITH_CONTEXT.delete(node.id);
+            autosave();
+          });
+        }
+        // Prevent clicks on label from toggling expand
+        deepContextToggle.addEventListener('click', (ev) => ev.stopPropagation());
       }
 
       // SUGGEST VIDEOS button (hidden for now)

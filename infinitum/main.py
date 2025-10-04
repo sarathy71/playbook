@@ -361,24 +361,69 @@ def api_deepdive():
     model = body.get("model", "gpt-4.1-mini")
     temperature = float(body.get("temperature", 0.3))
     selection = body.get("selection", {})
-    
+    with_context = bool(body.get("with_context", False))
+
     if not topic or not node or not selection:
         abort(400, "Missing topic, node, or selection.")
-    
+
     selection_text = selection.get("text", "").strip()
     if len(selection_text) < 8:
         abort(400, "Selection too short. Please select at least 8 characters.")
     if len(selection_text) > 3000:
         abort(400, "Selection too long. Please select less than 3000 characters.")
 
-    system_prompt = (
-        "You are an expert curriculum designer creating focused, educational content. "
-        "Given a text selection from a parent topic, create 1-3 child sections that meaningfully "
-        "deepen understanding of the selected concept. Focus on clarity, progressive learning, "
-        "and practical application."
-    )
+    if not with_context:
+        # Neutral/standalone prompt: do not mention global topic or breadcrumb
+        system_prompt = (
+            "You are an expert curriculum designer creating focused, standalone educational content. "
+            "Given a short text selection, produce 1-3 child sections that explain and deepen understanding "
+            "of that selection. Do NOT reference the parent topic, breadcrumb, or surrounding context."
+        )
 
-    user_prompt = f"""
+        user_prompt = f"""
+You are creating a focused deep dive structure based solely on the provided text selection.
+
+Selected Text to Deep Dive Into:
+"{selection_text}"
+
+Instructions:
+- Generate a shortName (3-6 words, noun-phrase) that captures the essence of the selection
+- Create children array where:
+  - children[0] is "Overview" with rich readContent (200-300 words, Markdown + LaTeX) explaining the selection
+  - children[1..] are 2-3 relevant subtopics with concise titles and 1-2 line descriptions (no readContent)
+- Focus tightly on the selected passage; do NOT include or rely on parent/topic-level context
+- Use clear, educational titles (not sentences)
+- Keep IDs URL-safe
+
+Return ONLY valid JSON:
+{{ 
+  "shortName": string,
+  "wrapperDescription": string (optional),
+  "children": TocNode[] 
+}}
+
+TocNode = {{ 
+  id?: string (optional), 
+  title: string, 
+  description?: string, 
+  readContent?: string (Markdown with LaTeX)
+}}
+
+Style guidelines:
+- shortName should be a concise noun-phrase (e.g., "Activation Functions")
+- Overview readContent should be comprehensive (200-300 words) with Markdown and LaTeX
+""".strip()
+
+    else:
+        # Context-aware prompt: include topic and breadcrumb
+        system_prompt = (
+            "You are an expert curriculum designer creating focused, educational content. "
+            "Given a text selection from a parent topic, create 1-3 child sections that meaningfully "
+            "deepen understanding of the selected concept. Focus on clarity, progressive learning, "
+            "and practical application."
+        )
+
+        user_prompt = f"""
 You are creating a focused deep dive structure based on a specific text selection from a parent topic.
 
 Global Topic: {topic}
@@ -594,9 +639,9 @@ Node: {node.get('title', '')}
 Description: {node.get('description', '')}
 Content: {content[:2000] if content else 'No content yet'}
 
-Return ONLY a JSON object with:
-- "prompt": string (crisp, concrete scene spec for a single diagram/plot/map/schematic)
-- "caption": string (exactly one sentence, ≤ 25 words, describing the image)
+    Return ONLY a JSON object with:
+    - "prompt": string (crisp, concrete scene spec for a single diagram/plot/map/schematic)
+    - "caption": string (exactly one sentence, <= 25 words, describing the image)
 
 Requirements:
 - Prefer labeled axes, minimal colors, clear legends, readable typography
@@ -628,7 +673,7 @@ Requirements:
             caption = sentences[0].strip()
             if not caption.endswith('.'):
                 caption += '.'
-            # Truncate if too long (≤ 25 words)
+            # Truncate if too long (<= 25 words)
             words = caption.split()
             if len(words) > 25:
                 caption = ' '.join(words[:25]) + '...'
