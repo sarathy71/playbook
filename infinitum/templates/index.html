@@ -357,47 +357,49 @@
     
     .sticky-actions-container {
       position: absolute;
-      top: 20px;
+      top: 8px; /* lifted slightly to avoid overlapping content */
       right: 20px;
+  transform: translateY(2px); /* moved 2px further down */
       z-index: 1000;
-      background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(10px);
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
-      padding: 8px 12px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      /* compact, transparent container so only the trigger is visible */
+      background: transparent;
+      border: none;
+      padding: 4px;
+      border-radius: 6px;
+      box-shadow: none;
     }
     
     .node-actions {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 4px;
     }
-    
-    .actions-label {
-      font-size: 12px;
-      color: #666;
-      font-weight: 500;
-    }
-    
+
     .actions-dropdown {
       position: relative;
     }
-    
+
+    /* Compact circular trigger showing only three dots */
     .actions-trigger {
-      background: none;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      padding: 4px 8px;
+      background: #fff;
+      border: 1px solid rgba(0,0,0,0.08);
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      padding: 0;
       cursor: pointer;
-      font-size: 16px;
-      color: #666;
-      transition: all 0.2s;
+      font-size: 18px;
+      color: #444;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.12s ease-in-out;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
     }
-    
+
     .actions-trigger:hover {
-      background: #f5f5f5;
-      border-color: #999;
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(0,0,0,0.08);
     }
 
     /* Toast styles */
@@ -1282,6 +1284,31 @@ Requirements:
       }
     }
 
+    // Force refresh content for a node: clear cache and re-fetch
+    async function refreshSection(nodeId) {
+      const node = findNodeById(CURRENT_TOC, nodeId);
+      if (!node) throw new Error('Node not found');
+
+      // If levels are enabled for this node, clear the active level cache and re-fetch
+      if (LEVELS_ENABLED.has(nodeId)) {
+        const activeLevel = ACTIVE_LEVEL.get(nodeId) || 5;
+        const levelMap = LEVEL_CONTENT.get(nodeId);
+        if (levelMap) {
+          levelMap.delete(activeLevel);
+        }
+        // Force fetch
+        await fetchLevelContent(nodeId, activeLevel);
+        return;
+      }
+
+      // Otherwise, clear single-content cache and re-fetch
+      CONTENT.delete(nodeId);
+      SUMMARIES.delete(nodeId);
+      CHAT_HISTORY.delete(nodeId); // optionally clear chat to reflect new content
+      // Trigger read
+      await readSection(node, getNodePath(nodeId));
+    }
+
     // Toast helper
     function showToast(message, type = 'success', timeout = 2500) {
       try {
@@ -1958,7 +1985,6 @@ Requirements:
         actionsContainer.className = 'sticky-actions-container';
         actionsContainer.innerHTML = `
           <div class="node-actions">
-            <span class="actions-label">Actions</span>
             <div class="actions-dropdown">
               <button class="actions-trigger" title="Actions">⋯</button>
               <div class="actions-menu">
@@ -1970,6 +1996,7 @@ Requirements:
                   <input type="checkbox" id="deepDiveContext-${nodeId}" ${DEEP_WITH_CONTEXT.has(nodeId) ? 'checked' : ''}>
                   <span>Deep dive with context</span>
                 </label>
+                <div style="border-top:1px solid var(--ring); margin-top:8px; padding-top:8px;"><button id="refreshAction-${nodeId}" class="readbtn">Refresh</button></div>
               </div>
             </div>
           </div>
@@ -2000,6 +2027,13 @@ Requirements:
               DEEP_WITH_CONTEXT.delete(nodeId);
             }
             autosave();
+          });
+        }
+        const refreshAction = actionsContainer.querySelector(`#refreshAction-${escapedNodeId}`);
+        if (refreshAction) {
+          refreshAction.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            refreshSection(nodeId).catch((err) => { showError('Refresh failed: ' + (err.message || String(err))); });
           });
         }
       }
@@ -2824,6 +2858,24 @@ Requirements:
         });
       }
 
+      // REFRESH button (force re-fetch, override cache)
+      const refreshBtn = document.createElement('button');
+      refreshBtn.className = 'readbtn';
+      refreshBtn.style.marginLeft = '8px';
+      refreshBtn.textContent = 'Refresh';
+      refreshBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        // Force refresh this node's content
+        try {
+          await refreshSection(node.id);
+        } catch (e) {
+          console.error('Refresh failed:', e);
+          showError('Refresh failed: ' + (e.message || String(e)));
+        }
+      });
+      // insert refresh button after read button
+      if (readBtn && readBtn.parentNode) readBtn.parentNode.insertBefore(refreshBtn, readBtn.nextSibling);
+
       // LEVELS checkbox (independent of expand/collapse)
       const levelsToggle = txt.querySelector('label[data-levels]');
       if (levelsToggle) {
@@ -3285,10 +3337,31 @@ Requirements:
         return;
       }
 
-      // If levels are enabled, refresh the current active level
+      // If levels are enabled, load the current active level only if not already cached
       if (LEVELS_ENABLED.has(node.id)) {
         const activeLevel = ACTIVE_LEVEL.get(node.id) || 5;
+        if (LEVEL_CONTENT.get(node.id)?.has(activeLevel)) {
+          // Content already loaded for this level — just render
+          if (NAV_MODE === 'leftnav') {
+            if (SELECTED_NODE_ID === node.id) renderSelectedNodeContent(node.id);
+          } else {
+            renderTree(CURRENT_TOC);
+          }
+          renderBreadcrumb();
+          return;
+        }
         await fetchLevelContent(node.id, activeLevel);
+        return;
+      }
+
+      // If single-content already exists for this node, do not re-fetch — just render it
+      if (CONTENT.has(node.id)) {
+        if (NAV_MODE === 'leftnav') {
+          if (SELECTED_NODE_ID === node.id) renderSelectedNodeContent(node.id);
+        } else {
+          renderTree(CURRENT_TOC);
+        }
+        renderBreadcrumb();
         return;
       }
 
