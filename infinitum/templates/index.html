@@ -163,64 +163,9 @@
       transition: width 0.3s ease;
     }
     
-    .left-nav-sidebar.collapsed {
-      width: 40px;
-    }
-    
-    .left-nav-header {
-      position: relative;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px;
-      border-bottom: 1px solid var(--ring);
-      background: #f8f9fa;
-    }
-    
-    .left-nav-header .left-nav-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--ink);
-    }
-    
-    .left-nav-toggle-btn {
-      position: absolute;
-      right: -12px;
-      top: 50%;
-      transform: translateY(-50%);
-      background: #fff;
-      border: 1px solid var(--ring);
-      border-left: none;
-      cursor: pointer;
-      padding: 8px 4px;
-      border-radius: 0 6px 6px 0;
-      color: var(--muted);
-      font-size: 12px;
-      transition: all 0.2s;
-      z-index: 10;
-      box-shadow: 2px 0 4px rgba(0,0,0,0.1);
-    }
-    
-    .left-nav-toggle-btn:hover {
-      background: var(--ring);
-      color: var(--ink);
-      box-shadow: 2px 0 6px rgba(0,0,0,0.15);
-    }
-    
-    .left-nav-sidebar.collapsed .left-nav-toggle-btn {
-      transform: rotate(180deg);
-    }
-    
-    .left-nav-sidebar.collapsed .left-nav-header .left-nav-title {
-      display: none;
-    }
-    
-    .left-nav-sidebar.collapsed .left-nav-tree {
-      display: none;
-    }
     
     .left-nav-tree {
-      padding: 12px;
+      padding: 8px;
     }
     
     .main-content-pane { 
@@ -235,12 +180,12 @@
     .left-nav-tree li { margin: 0; }
     .left-nav-node { 
       display: block; 
-      padding: 8px 12px; 
-      border-radius: 6px; 
+      padding: 6px 10px; 
+      border-radius: 4px; 
       cursor: pointer; 
       transition: all 0.2s;
       border-left: 3px solid transparent;
-      margin-bottom: 2px;
+      margin-bottom: 0.5px;
     }
     .left-nav-node:hover { background: #f8f9fa; }
     .left-nav-node.active { 
@@ -261,19 +206,45 @@
       font-size: 12px;
     }
     .left-nav-children { 
-      margin-left: 20px; 
-      margin-top: 4px;
+      margin-left: 16px; 
+      margin-top: 2px;
+      position: relative;
+    }
+    
+    .left-nav-children::before {
+      content: '';
+      position: absolute;
+      left: -8px;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: linear-gradient(to bottom, #d1d5db, transparent);
+    }
+    
+    .left-nav-children li {
+      position: relative;
+    }
+    
+    .left-nav-children li::before {
+      content: '';
+      position: absolute;
+      left: -8px;
+      top: 12px;
+      width: 8px;
+      height: 1px;
+      background: linear-gradient(to right, #d1d5db, transparent);
     }
     .left-nav-toggle { 
       display: inline-block; 
-      width: 16px; 
+      width: 14px; 
       text-align: center; 
-      margin-right: 8px;
+      margin-right: 6px;
       cursor: pointer;
+      font-size: 10px;
     }
-    .left-nav-toggle::before { content: "▶"; }
-    .left-nav-toggle.expanded::before { content: "▼"; }
-    .left-nav-title { font-size: 13px; line-height: 1.4; }
+    .left-nav-toggle::before { content: "▸"; }
+    .left-nav-toggle.expanded::before { content: "▾"; }
+    .left-nav-title { font-size: 11px; line-height: 1.3; }
     .left-nav-description { 
       font-size: 11px; 
       color: var(--muted); 
@@ -495,27 +466,13 @@
 
     <div class="space"></div>
 
-    <!-- Result -->
-    <div class="card" style="padding: 8px 12px;">
-      <div class="toolbar" style="justify-content:space-between; margin-bottom: 8px;">
-        <div>
-          <div class="muted">Result</div>
-          <div id="resultTitle" style="font-weight:700; font-size:18px;">No topic yet</div>
-        </div>
-        <div class="muted">Top-level sections: <span id="topCount">0</span></div>
-      </div>
-
       <!-- Breadcrumb -->
-      <div id="breadcrumb" class="muted mono" style="margin-top:4px; overflow:auto; white-space:nowrap;"></div>
+    <div id="breadcrumb" class="muted mono" style="margin-top:4px; overflow:auto; white-space:nowrap;"></div>
 
       <!-- Navigation Container -->
       <div id="navContainer" class="nav-mode-leftnav">
         <!-- Left Navigation Sidebar -->
         <div id="leftNavSidebar" class="left-nav-sidebar">
-          <div class="left-nav-header">
-            <span class="left-nav-title">Navigation</span>
-            <button id="leftNavToggle" class="left-nav-toggle-btn" title="Collapse/Expand">◀</button>
-          </div>
           <div id="leftNavTree" class="left-nav-tree"></div>
         </div>
         
@@ -1020,14 +977,10 @@ Requirements:
       }
 
       // Update UI counters
-      const topCountEl = document.getElementById("topCount");
-      if (topCountEl) topCountEl.textContent = CURRENT_TOC.length;
       
       const runCountEl = document.getElementById("runCount");
       if (runCountEl) runCountEl.textContent = RUNS_HISTORY.length;
       
-      const resultTitleEl = document.getElementById("resultTitle");
-      if (resultTitleEl) resultTitleEl.textContent = notebook.config?.topic ? `TOC for: ${notebook.config.topic}` : "No topic yet";
 
       // Restore navigation state
       NAV_MODE = notebook.navMode || 'leftnav';
@@ -1138,15 +1091,9 @@ Requirements:
           const now = new Date();
           const hoursAgo = (now - savedTime) / (1000 * 60 * 60);
           
-          if (hoursAgo < 24) { // Only offer autosave if less than 24 hours old
-            const resume = confirm(
-              `Found a saved session from ${savedTime.toLocaleString()}.\n\n` +
-              `Do you want to resume where you left off?`
-            );
-            if (resume) {
-              deserializeNotebook(notebook);
-              return true;
-            }
+          if (hoursAgo < 24) { // Only load autosave if less than 24 hours old
+            deserializeNotebook(notebook);
+            return true;
           }
         }
       } catch (e) {
@@ -1391,13 +1338,6 @@ Requirements:
       autosave();
     }
 
-    function toggleLeftNav() {
-      const leftNavSidebar = $("leftNavSidebar");
-      if (leftNavSidebar) {
-        leftNavSidebar.classList.toggle('collapsed');
-        autosave();
-      }
-    }
 
     function setReadingWidth(width) {
       READING_WIDTH = width;
@@ -1465,12 +1405,6 @@ Requirements:
       title.textContent = node.title;
       nodeDiv.appendChild(title);
       
-      if (node.description) {
-        const desc = document.createElement('div');
-        desc.className = 'left-nav-description';
-        desc.textContent = node.description;
-        nodeDiv.appendChild(desc);
-      }
       
       nodeDiv.addEventListener('click', () => {
         selectNodeInLeftNav(node.id);
@@ -1570,9 +1504,20 @@ Requirements:
         readbox.innerHTML = renderMarkdown(CONTENT.get(nodeId));
         contentDiv.appendChild(readbox);
         typesetMath(readbox);
+        
+        // Add read button with "read" state
+        const readBtn = document.createElement('button');
+        readBtn.id = `readBtn-${nodeId}`;
+        readBtn.textContent = 'Read';
+        readBtn.className = 'btn read';
+        readBtn.addEventListener('click', () => {
+          readSection(node, getNodePath(nodeId));
+        });
+        contentDiv.appendChild(readBtn);
       } else {
         // Add read button
         const readBtn = document.createElement('button');
+        readBtn.id = `readBtn-${nodeId}`;
         readBtn.textContent = 'Read';
         readBtn.className = 'btn';
         readBtn.addEventListener('click', () => {
@@ -1614,6 +1559,18 @@ Requirements:
       const selectedNode = document.querySelector(`[data-node-id="${nodeId}"]`);
       if (selectedNode) {
         selectedNode.classList.add('active');
+      }
+    }
+
+    function updateReadButtonState(nodeId) {
+      // Update Read button state in the main content pane
+      const readBtn = document.querySelector(`#readBtn-${nodeId}`);
+      if (readBtn) {
+        if (CONTENT.has(nodeId)) {
+          readBtn.classList.add('read');
+        } else {
+          readBtn.classList.remove('read');
+        }
       }
     }
 
@@ -2727,8 +2684,6 @@ Requirements:
         return false;
       }
       visit(CURRENT_TOC);
-      const topCountEl = document.getElementById("topCount");
-      if (topCountEl) topCountEl.textContent = CURRENT_TOC.length;
       if (NAV_MODE === 'leftnav') {
   renderLeftNavTree();
 } else {
@@ -2813,21 +2768,17 @@ Requirements:
         } else {
         CONTENT.set(node.id, mock);
         }
+        
+        // Update Read button state
+        updateReadButtonState(node.id);
+        
         if (NAV_MODE === 'leftnav') {
           // In left nav mode, just update the selected node content
           if (SELECTED_NODE_ID === node.id) {
             renderSelectedNodeContent(node.id);
           }
         } else {
-          if (NAV_MODE === 'leftnav') {
-          renderLeftNavTree();
-        } else {
-          if (NAV_MODE === 'leftnav') {
-  renderLeftNavTree();
-} else {
-  renderTree(CURRENT_TOC);
-}
-        }
+          renderTree(CURRENT_TOC);
         }
         renderBreadcrumb();
         autosave();
@@ -2872,6 +2823,9 @@ Requirements:
         CONTENT.set(node.id, fullContent);
         SUMMARIES.set(node.id, summary);
         
+        // Update Read button state
+        updateReadButtonState(node.id);
+        
         // Check visualization eligibility
         checkVisualizationEligibility(node.id);
         
@@ -2912,8 +2866,6 @@ Requirements:
       showError("");
       $("btnGen").disabled = true; $("btnGen").textContent = "Thinking…";
       BREAD = []; EXP_CACHE.clear(); CONTENT.clear(); READING.clear(); EXPANDED.clear(); CHAT_HISTORY.clear(); CHATTING.clear(); VIDEOS.clear(); FETCHING_VIDEOS.clear(); LEVELS_ENABLED.clear(); ACTIVE_LEVEL.clear(); LEVEL_CONTENT.clear(); LEVEL_READING.clear();
-      const resultTitleEl = document.getElementById("resultTitle");
-      if (resultTitleEl) resultTitleEl.textContent = topic ? `TOC for: ${topic}` : "No topic yet";
 
       try {
         let result;
@@ -3040,8 +2992,6 @@ Requirements:
       }
     });
     
-    // Left nav collapse toggle
-    $("leftNavToggle").addEventListener("click", toggleLeftNav);
     
     $("navInline").addEventListener("change", (e) => {
       if (e.target.checked) {
