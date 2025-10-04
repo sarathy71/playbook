@@ -3402,6 +3402,12 @@ Requirements:
             const firstNode = findFirstSelectableNode(CURRENT_TOC);
             if (firstNode) {
               selectNodeInLeftNav(firstNode.id);
+              // Automatically read/fetch content for the first selectable node so it doesn't remain "Loading"
+              try {
+                await readSection(firstNode, getNodePath(firstNode.id));
+              } catch (e) {
+                console.warn('Auto-read of first node failed:', e);
+              }
             }
           }
         } else {
