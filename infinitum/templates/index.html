@@ -4304,11 +4304,24 @@ Requirements:
             const firstChapter = CURRENT_TOC[0];
             if (firstChapter) {
               selectNodeInLeftNav(firstChapter.id);
-              // Automatically read/fetch content for the first chapter so the main pane is populated
-              try {
-                await readSection(firstChapter, getNodePath(firstChapter.id));
-              } catch (e) {
-                console.warn('Auto-read of first chapter failed:', e);
+              // If server returned initial content for the first chapter, use it to populate UI
+              if (result && result.firstContent) {
+                try {
+                  CONTENT.set(firstChapter.id, result.firstContent);
+                  // Generate summary asynchronously (best-effort)
+                  generateSummary(firstChapter.id, result.firstContent).then((s) => { SUMMARIES.set(firstChapter.id, s); autosave(); }).catch(() => {});
+                } catch (e) {
+                  console.warn('Failed to apply firstContent from /api/toc:', e);
+                }
+                // Render immediately without calling readSection
+                renderSelectedNodeContent(firstChapter.id);
+              } else {
+                // Fall back to original behavior: fetch full content for the first chapter
+                try {
+                  await readSection(firstChapter, getNodePath(firstChapter.id));
+                } catch (e) {
+                  console.warn('Auto-read of first chapter failed:', e);
+                }
               }
             }
           }

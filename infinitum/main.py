@@ -341,7 +341,56 @@ Requirements:
 
     parsed, raw = _chat_json(model, temperature, SYSTEM_PROMPT, user_prompt)
     toc = _ensure_ids(parsed.get("toc", []))
-    return jsonify({"toc": toc, "model": raw.get("model"), "tokens": raw.get("usage")})
+
+    # Best-effort: also fetch content for the first top-level node so the client
+    # can render the first chapter immediately without an extra round-trip.
+    first_content = None
+    first_content_meta = None
+    try:
+        if toc and len(toc) > 0:
+            first = toc[0]
+            # Build a lightweight read prompt similar to /api/read (defaults to level 5)
+            level = 5
+            level_descriptions = {
+                5: "Explain for an informed learner: comprehensive overview with good balance of intuition and technical details, standard terminology."
+            }
+            level_instruction = level_descriptions.get(level, "")
+
+            user_prompt_read = f"""
+Write a clear, well-structured explanation (250–450 words) for the selected outline item. Use Markdown and LaTeX for math.
+
+Global Topic: {topic}
+Audience: {audience}
+Proficiency Level: {level}/10 - {level_instruction}
+Depth preference (context): {depth}
+Approx sections per level (context): {sections}
+
+Breadcrumb (root->current): {''}
+Current Item: {first.get('title','')}
+Current Item ID: {first.get('id','')}
+
+Style:
+- Use paragraphs and short bullet lists where helpful.
+- Inline math: $...$ ; display math: $$...$$
+- Match the requested proficiency level exactly: {level_instruction}
+- No JSON.
+""".strip()
+
+            content, raw2 = _chat_text(model, temperature,
+                                      "You explain concepts clearly with examples. Use Markdown and LaTeX for math.",
+                                      [{"role": "user", "content": user_prompt_read}])
+            first_content = content
+            first_content_meta = {"model": raw2.get("model"), "tokens": raw2.get("usage")}
+    except Exception as e:
+        # Do not fail the entire TOC generation if the read call fails; log and continue.
+        print(f"Warning: fetching first node content with /api/toc failed: {e}")
+
+    resp_obj = {"toc": toc, "model": raw.get("model"), "tokens": raw.get("usage")}
+    if first_content is not None:
+        resp_obj["firstContent"] = first_content
+        if first_content_meta:
+            resp_obj["firstContentMeta"] = first_content_meta
+    return jsonify(resp_obj)
 
 @app.post("/api/expand")
 def api_expand():
