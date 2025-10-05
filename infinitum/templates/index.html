@@ -3128,6 +3128,16 @@ Requirements:
           id: child.id.replace(wrapperId, finalWrapperId)
         }));
 
+        // Remove any automatic "Overview" child from deep-dive children —
+        // the wrapper itself will contain the overview content.
+        wrapper.children = (wrapper.children || []).filter(c => {
+          try {
+            return !/\boverview\b/i.test(String(c.title || ''));
+          } catch (e) {
+            return true;
+          }
+        });
+
         // Create undo snapshot
         const undoSnapshot = {
           type: 'add-children',
@@ -3146,66 +3156,88 @@ Requirements:
         EXP_CACHE.set(nodeId, node.children);
         EXP_CACHE.set(wrapper.id, wrapper.children);
 
-        // Add to expanded set: parent, wrapper, and first child only
+        // Add to expanded set: parent and wrapper. The wrapper node itself will hold the overview content
         EXPANDED.add(nodeId);
         EXPANDED.add(wrapper.id);
-        if (wrapper.children.length > 0) {
-          EXPANDED.add(wrapper.children[0].id);
-        }
 
-        // Set content for the Overview by composing structured sections from all deep-dive children
-        if (wrapper.children.length > 0) {
-          const overviewNode = wrapper.children[0];
-          const overviewId = overviewNode.id;
-          try {
-            // Build composed markdown: title + sections for each child (heading + content/description)
-            let composed = `# ${wrapper.title}\n\n`;
-            for (const child of wrapper.children) {
-              const title = child.title || '';
-              const desc = child.description || '';
-              const rawContent = child.readContent || '';
-              const normalized = normalizeMathDelimiters(rawContent || desc || '');
-              // Use an H2 for child sections to keep hierarchy clear
-              composed += `## ${title}\n\n${normalized}\n\n`;
-            }
-
-            // Save composed content as the overview's full content
-            CONTENT.set(overviewId, composed);
-
-            // Initialize chat history for Overview with system message
-            if (!CHAT_HISTORY.has(overviewId)) {
-              CHAT_HISTORY.set(overviewId, []);
-            }
-            CHAT_HISTORY.get(overviewId).push({
-              role: 'system',
-              content: `Overview created from selection: "${selectionInfo.snippet}"`,
-              ts: new Date().toISOString()
-            });
-
-            // Generate and store a summary for the composed content
-            try {
-              const summary = await generateSummary(overviewId, composed);
-              if (summary) SUMMARIES.set(overviewId, summary);
-            } catch (e) {
-              console.warn('Summary generation for deep-dive overview failed:', e);
-            }
-
-            // Check visualization eligibility for the overview
-            try { checkVisualizationEligibility(overviewId); } catch (e) { /* ignore */ }
-
-            // Persist autosave state after inserting deep-dive content
-            autosave();
-          } catch (e) {
-            console.error('Failed to set deep dive overview content:', e);
+        // Compose overview content directly on the wrapper node (no separate Overview child)
+        try {
+          // Build detailed child sections first
+          let detailed = '';
+          for (const child of wrapper.children) {
+            const title = child.title || '';
+            const desc = child.description || '';
+            const rawContent = child.readContent || '';
+            const normalized = normalizeMathDelimiters(rawContent || desc || '');
+            detailed += `## ${title}\n\n${normalized}\n\n`;
           }
+
+          const overviewId = wrapper.id; // use wrapper id for overview content
+
+          // Generate a concise summary (tries to produce 2-4 paragraphs when possible)
+          let summary = '';
+          try {
+            // Use a combined input to the summary generator for better results
+            const summarySeed = `Title: ${wrapper.title}\n\nDescription: ${wrapper.description || ''}\n\nDetails:\n\n${detailed}`;
+            summary = await generateSummary(overviewId, summarySeed) || '';
+          } catch (e) {
+            console.warn('Summary generation for deep-dive overview failed:', e);
+            summary = wrapper.description || '';
+          }
+
+          // Build Key topics list
+          const keyTopicsList = (wrapper.children || []).map(c => `- ${c.title || c.id}`).join('\n') || '';
+
+          // Build crisp examples from child readContent or description (first sentence)
+          function firstSentence(s) {
+            if (!s) return '';
+            const m = String(s).trim().match(/([\s\S]*?[.!?])(?=\s|$)/);
+            return m ? m[1].trim() : (String(s).trim().split('\n')[0] || '').trim();
+          }
+          let examples = '';
+          for (const c of (wrapper.children || [])) {
+            const src = c.readContent || c.description || '';
+            const ex = firstSentence(src);
+            examples += `- ${c.title}: ${ex || '(example not provided)'}\n`;
+          }
+
+          // Compose final overview: title, summary, key topics, crisp examples, then detailed sections
+          let finalComposed = `# ${wrapper.title}\n\n`;
+          if (summary) finalComposed += `${summary}\n\n`;
+          if (keyTopicsList) finalComposed += `**Key topics:**\n\n${keyTopicsList}\n\n`;
+          if (examples) finalComposed += `**Crisp examples:**\n\n${examples}\n`;
+          finalComposed += detailed;
+
+          // Save composed content as the wrapper's full content
+          CONTENT.set(overviewId, finalComposed);
+
+          // Store summary for UI (summary box) if available
+          if (summary) SUMMARIES.set(overviewId, summary);
+
+          // Initialize chat history for wrapper overview with a system message
+          if (!CHAT_HISTORY.has(overviewId)) {
+            CHAT_HISTORY.set(overviewId, []);
+          }
+          CHAT_HISTORY.get(overviewId).push({
+            role: 'system',
+            content: `Overview created from selection: "${selectionInfo.snippet}"`,
+            ts: new Date().toISOString()
+          });
+
+          // Check visualization eligibility for the wrapper overview
+          try { checkVisualizationEligibility(overviewId); } catch (e) { /* ignore */ }
+
+          autosave();
+        } catch (e) {
+          console.error('Failed to set deep dive overview content on wrapper:', e);
         }
 
-        // Track deep dive event
+        // Track deep dive event (overview lives on the wrapper node now)
         DEEP_DIVES.push({
           nodeId,
           wrapperId: wrapper.id,
           shortName,
-          overviewChildId: wrapper.children[0]?.id,
+          overviewChildId: wrapper.id,
           selection: {
             text: selectionInfo.text,
             snippet: selectionInfo.snippet
@@ -3228,8 +3260,8 @@ Requirements:
         // Re-render and scroll to Overview
         if (NAV_MODE === 'leftnav') {
           renderLeftNavTree();
-          // Auto-select the new deep dive node
-          selectNodeInLeftNav(wrapper.children[0].id);
+          // Auto-select the wrapper (which now contains the overview content)
+          selectNodeInLeftNav(wrapper.id);
         } else {
           if (NAV_MODE === 'leftnav') {
           renderLeftNavTree();
@@ -3243,34 +3275,14 @@ Requirements:
         }
         renderBreadcrumb();
         
-        // Scroll to the wrapper (deep dive container) first, then to Overview
+        // Scroll to and highlight the wrapper (which shows the overview content)
         setTimeout(() => {
           const wrapperElement = document.querySelector(`[data-node-id="${wrapper.id}"]`);
           if (wrapperElement) {
-            // Scroll to the wrapper first
             wrapperElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            
-            // Add a brief highlight effect to the wrapper
             wrapperElement.style.transition = 'background-color 0.3s ease';
             wrapperElement.style.backgroundColor = '#e3f2fd';
-            setTimeout(() => {
-              wrapperElement.style.backgroundColor = '';
-            }, 2000);
-            
-            // Then scroll to the Overview (first child) after a short delay
-            setTimeout(() => {
-              const overviewChild = document.querySelector(`[data-node-id="${wrapper.children[0]?.id}"]`);
-              if (overviewChild) {
-                overviewChild.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                
-                // Add highlight to the overview as well
-                overviewChild.style.transition = 'background-color 0.3s ease';
-                overviewChild.style.backgroundColor = '#f0f8ff';
-                setTimeout(() => {
-                  overviewChild.style.backgroundColor = '';
-                }, 1500);
-              }
-            }, 500);
+            setTimeout(() => { wrapperElement.style.backgroundColor = ''; }, 2000);
           }
         }, 100);
 
@@ -4287,16 +4299,16 @@ Requirements:
         }
         if (NAV_MODE === 'leftnav') {
           renderLeftNavTree();
-          // Auto-select first node
+          // Auto-select the first top-level chapter (not its first child) and read its content
           if (CURRENT_TOC.length > 0) {
-            const firstNode = findFirstSelectableNode(CURRENT_TOC);
-            if (firstNode) {
-              selectNodeInLeftNav(firstNode.id);
-              // Automatically read/fetch content for the first selectable node so it doesn't remain "Loading"
+            const firstChapter = CURRENT_TOC[0];
+            if (firstChapter) {
+              selectNodeInLeftNav(firstChapter.id);
+              // Automatically read/fetch content for the first chapter so the main pane is populated
               try {
-                await readSection(firstNode, getNodePath(firstNode.id));
+                await readSection(firstChapter, getNodePath(firstChapter.id));
               } catch (e) {
-                console.warn('Auto-read of first node failed:', e);
+                console.warn('Auto-read of first chapter failed:', e);
               }
             }
           }
