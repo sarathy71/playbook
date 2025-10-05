@@ -4053,6 +4053,22 @@ Requirements:
     }
 
     function injectChildren(nodeId, children, ancestorPath = []) {
+      // If the server returned rich readContent with children (common for Overview
+      // children), normalize math delimiters and stash the content in CONTENT so
+      // selecting the child doesn't trigger an unnecessary re-fetch and math
+      // delimiters are consistent for the Markdown renderer and MathJax.
+      try {
+        (children || []).forEach((child) => {
+          if (child && child.readContent) {
+            const normalized = normalizeMathDelimiters(child.readContent);
+            CONTENT.set(child.id, normalized);
+            // Best-effort: generate a summary in background for faster UI
+            generateSummary(child.id, normalized).then((s) => { if (s) SUMMARIES.set(child.id, s); autosave(); }).catch(() => {});
+          }
+        });
+      } catch (e) {
+        console.warn('injectChildren: failed to prepopulate child readContent', e);
+      }
       function visit(nodes) {
         for (const n of nodes) {
           if (n.id === nodeId) {
@@ -4307,14 +4323,30 @@ Requirements:
               // If server returned initial content for the first chapter, use it to populate UI
               if (result && result.firstContent) {
                 try {
-                  CONTENT.set(firstChapter.id, result.firstContent);
+                  // Normalize math delimiters early so MathJax and the Markdown renderer
+                  // see consistent inline/display math patterns. This fixes cases where
+                  // the initial content coming from /api/toc uses slightly different
+                  // delimiters or is wrapped in code fences.
+                  const normalizedFirst = normalizeMathDelimiters(result.firstContent);
+                  CONTENT.set(firstChapter.id, normalizedFirst);
                   // Generate summary asynchronously (best-effort)
-                  generateSummary(firstChapter.id, result.firstContent).then((s) => { SUMMARIES.set(firstChapter.id, s); autosave(); }).catch(() => {});
+                  generateSummary(firstChapter.id, normalizedFirst).then((s) => { SUMMARIES.set(firstChapter.id, s); autosave(); }).catch(() => {});
                 } catch (e) {
                   console.warn('Failed to apply firstContent from /api/toc:', e);
                 }
                 // Render immediately without calling readSection
                 renderSelectedNodeContent(firstChapter.id);
+                // Ensure MathJax typesetting runs on the newly inserted content.
+                // The small timeout gives the DOM a moment to update; if MathJax
+                // isn't ready, typesetMath will queue the request.
+                setTimeout(() => {
+                  const readbox = document.querySelector('.selected-node-content .readbox');
+                  if (readbox) {
+                    typesetMath(readbox).then(() => emitContentRendered(firstChapter.id)).catch(() => emitContentRendered(firstChapter.id));
+                  } else {
+                    typesetMath().then(() => emitContentRendered(firstChapter.id)).catch(() => emitContentRendered(firstChapter.id));
+                  }
+                }, 60);
               } else {
                 // Fall back to original behavior: fetch full content for the first chapter
                 try {
