@@ -965,6 +965,7 @@ Requirements:
   let PENDING_ANNOTATION_SELECTION = null; // holds selection info while annotation modal is open
   const HIGHLIGHTS = new Map(); // nodeId -> [{id, text, snippet, xpath, startOffset, endOffset}]
   const ANNOTATIONS = new Map(); // nodeId -> [{id, text, snippet, xpath, note}]
+  const DEEP_MARKS = new Map(); // nodeId -> [{id, text, snippet, xpath, wrapperId}]
 
     // ----------------------- Notebook Functions -----------------------
     function serializeNotebook() {
@@ -1031,6 +1032,11 @@ Requirements:
       for (const [nodeId, list] of ANNOTATIONS) {
         annotations[nodeId] = list;
       }
+      // Serialize deep marks (deep dives)
+      const deepMarks = {};
+      for (const [nodeId, list] of DEEP_MARKS) {
+        deepMarks[nodeId] = list;
+      }
 
       const deepWithContext = Array.from(DEEP_WITH_CONTEXT);
 
@@ -1068,6 +1074,7 @@ Requirements:
         vizElig,
         highlights,
         annotations,
+    deepMarks,
         navMode: NAV_MODE,
         selectedNodeId: SELECTED_NODE_ID,
         readingWidth: READING_WIDTH
@@ -1156,6 +1163,14 @@ Requirements:
       if (notebook.annotations) {
         for (const [nodeId, list] of Object.entries(notebook.annotations)) {
           ANNOTATIONS.set(nodeId, list || []);
+        }
+      }
+
+      // Restore deep marks
+      DEEP_MARKS.clear();
+      if (notebook.deepMarks) {
+        for (const [nodeId, list] of Object.entries(notebook.deepMarks)) {
+          DEEP_MARKS.set(nodeId, list || []);
         }
       }
 
@@ -1267,7 +1282,7 @@ Requirements:
       setTimeout(() => {
         typesetMath();
         // Re-apply highlights after math typeset
-        setTimeout(() => { applyHighlightsForNode(SELECTED_NODE_ID); applyAnnotationsForNode(SELECTED_NODE_ID); }, 40);
+        setTimeout(() => { applyHighlightsForNode(SELECTED_NODE_ID); applyAnnotationsForNode(SELECTED_NODE_ID); applyDeepMarksForNode(SELECTED_NODE_ID); }, 40);
       }, 200);
     }
 
@@ -1898,6 +1913,102 @@ Requirements:
       return meta;
     }
 
+    // ---------- Deep mark helpers (similar to annotations but mark that a selection was deep-dived)
+    function uuidDeep() {
+      return 'd-' + ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+      );
+    }
+
+    function createDeepMarkFromSelection(wrapperId) {
+      if (!currentSelection) return null;
+      const { range, text, nodeId, snippet } = currentSelection;
+      const r = range.cloneRange();
+      const span = document.createElement('span');
+      const did = uuidDeep();
+      span.className = 'annotated'; // visually same as annotation
+      span.dataset.deepId = did;
+      span.title = 'Deep dive (click to open)';
+
+      try {
+        r.surroundContents(span);
+      } catch (e) {
+        const frag = r.extractContents();
+        span.appendChild(frag);
+        r.insertNode(span);
+      }
+
+      const container = span.closest('.readbox') || span.closest('.chat-message') || span;
+      const xpath = getXPathForElement(container);
+      const meta = { id: did, text, snippet, xpath, wrapperId: wrapperId || null };
+      if (!DEEP_MARKS.has(nodeId)) DEEP_MARKS.set(nodeId, []);
+      DEEP_MARKS.get(nodeId).push(meta);
+      autosave();
+      hideSelectionToolbar();
+      return meta;
+    }
+
+    function applyDeepMarksForNode(nodeId) {
+      if (!nodeId) return;
+      const list = DEEP_MARKS.get(nodeId) || [];
+      // Remove existing deep-mark spans first (same selector as annotated but only those with data-deep-id)
+      removeAllDeepMarksInNode(nodeId);
+
+      for (const d of list) {
+        try {
+          const container = getElementByXPath(d.xpath);
+          if (!container) continue;
+          const textNode = findTextNodeContaining(container, d.text);
+          if (!textNode) continue;
+          const idx = textNode.nodeValue.indexOf(d.text);
+          if (idx === -1) continue;
+          const range = document.createRange();
+          range.setStart(textNode, idx);
+          range.setEnd(textNode, idx + d.text.length);
+          const span = document.createElement('span');
+          span.className = 'annotated';
+          span.dataset.deepId = d.id;
+          span.title = 'Deep dive (click to open)';
+          try { range.surroundContents(span); }
+          catch (e) { const frag = range.extractContents(); span.appendChild(frag); range.insertNode(span); }
+        } catch (e) {
+          console.warn('Failed to apply deep mark', d, e);
+        }
+      }
+    }
+
+    function removeAllDeepMarksInNode(nodeId) {
+      const container = document.querySelector('.selected-node-content');
+      if (!container) return;
+      const spans = container.querySelectorAll('span.annotated[data-deep-id]');
+      spans.forEach(s => {
+        const parent = s.parentNode;
+        while (s.firstChild) parent.insertBefore(s.firstChild, s);
+        parent.removeChild(s);
+        parent.normalize();
+      });
+    }
+
+    function removeDeepMarkById(did) {
+      const spans = document.querySelectorAll(`span.annotated[data-deep-id="${did}"]`);
+      spans.forEach(s => {
+        const parent = s.parentNode;
+        while (s.firstChild) parent.insertBefore(s.firstChild, s);
+        parent.removeChild(s);
+        parent.normalize();
+      });
+
+      for (const [nodeId, list] of DEEP_MARKS) {
+        const idx = list.findIndex(item => item.id === did);
+        if (idx !== -1) {
+          list.splice(idx, 1);
+          if (list.length === 0) DEEP_MARKS.delete(nodeId);
+          autosave();
+          break;
+        }
+      }
+    }
+
     function createAnnotationFromSpan(span) {
       if (!span) return null;
       // Find nodeId of the containing node
@@ -1948,7 +2059,8 @@ Requirements:
     function removeAllAnnotationsInNode(nodeId) {
       const container = document.querySelector('.selected-node-content');
       if (!container) return;
-      const spans = container.querySelectorAll('span.annotated');
+      // Only remove annotation spans (those with data-annotation-id)
+      const spans = container.querySelectorAll('span.annotated[data-annotation-id]');
       spans.forEach(s => {
         const parent = s.parentNode;
         while (s.firstChild) parent.insertBefore(s.firstChild, s);
@@ -2051,14 +2163,50 @@ Requirements:
       closeAnnotationModal();
     }
 
-    // Click handler: open editor when clicking an annotated span
+  // Click handler: clicking an annotated span should open the selection toolbar
+    // instead of directly opening the annotation editor. The toolbar's Annotate
+    // action will open the editor; if the clicked span contains an existing
+    // annotation id we attach it to the selectionInfo so the toolbar knows to
+    // open the editor for that annotation.
     document.addEventListener('click', (e) => {
       const ael = e.target.closest && e.target.closest('span.annotated');
       if (ael) {
         e.stopPropagation();
-        const aid = ael.dataset.annotationId || null;
-        if (aid) {
-          openAnnotationEditor(aid);
+        try {
+          const span = ael;
+          const text = (span.textContent || '').trim();
+          // Determine containing readbox/chat container and node id
+          const container = span.closest('.readbox') || span.closest('.chat-message') || span;
+          const nodeId = findNodeIdFromContainer(container) || SELECTED_NODE_ID || null;
+
+          // Build a Range that selects the annotated span contents
+          const range = document.createRange();
+          range.selectNodeContents(span);
+
+          const snippet = text.length > 50 ? text.substring(0,50) + '...' : text;
+
+          const selectionInfo = {
+            text,
+            nodeId,
+            range,
+            snippet,
+            readbox: container,
+            chatMessage: container && container.classList && container.classList.contains('chat-message') ? container : null,
+            nodeContainer: container,
+            isFromChat: container && container.classList && container.classList.contains('chat-message'),
+            // preserve annotation id and deep-id if this span corresponds to an existing annotation/deep mark
+            annotationId: span.dataset.annotationId || null,
+            deepId: span.dataset.deepId || null
+          };
+
+          // Set global selection and show toolbar near the span
+          currentSelection = selectionInfo;
+          // Keep the toolbar open for a short time even if the document selection changes
+          window._annoClickKeep = true;
+          setTimeout(() => { window._annoClickKeep = false; }, 350);
+          showSelectionToolbar(selectionInfo);
+        } catch (err) {
+          console.warn('Annotated span click handler failed:', err);
         }
       }
     });
@@ -2544,7 +2692,7 @@ Requirements:
         initializeChatForNode(nodeId, chatContainer);
       }
       // Re-apply highlights for this node after rendering
-      try { setTimeout(() => applyHighlightsForNode(nodeId), 40); } catch (e) { /* ignore */ }
+      try { setTimeout(() => { applyHighlightsForNode(nodeId); applyAnnotationsForNode(nodeId); applyDeepMarksForNode(nodeId); }, 40); } catch (e) { /* ignore */ }
     }
 
     function updateLeftNavHighlighting(nodeId) {
@@ -2817,6 +2965,31 @@ Requirements:
       const node = findNodeById(CURRENT_TOC, nodeId);
       if (!node) return;
 
+      // If this selection is already a deep-mark pointing to an existing wrapper, navigate to it
+      if (selectionInfo.deepId) {
+        // Find deep mark meta
+        for (const [nId, list] of DEEP_MARKS) {
+          const dm = list.find(d => d.id === selectionInfo.deepId);
+          if (dm && dm.wrapperId) {
+            // Find wrapper node and select its overview child if present
+            const wrapperNode = findNodeById(CURRENT_TOC, dm.wrapperId);
+            if (wrapperNode && wrapperNode.children && wrapperNode.children.length > 0) {
+              // Ensure parents expanded and select the first child overview
+              EXPANDED.add(dm.wrapperId);
+              if (NAV_MODE === 'leftnav') {
+                renderLeftNavTree();
+                selectNodeInLeftNav(wrapperNode.children[0].id);
+              } else {
+                renderTree(CURRENT_TOC);
+              }
+              hideSelectionToolbar();
+              if (diveBtn) { diveBtn.classList.remove('loading'); diveBtn.disabled = false; }
+              return;
+            }
+          }
+        }
+      }
+
       // Deep dive confirmed - proceed directly
 
       try {
@@ -2969,6 +3142,17 @@ Requirements:
           createdAt: new Date().toISOString(),
           newChildIds: [wrapper.id, ...wrapper.children.map(c => c.id)]
         });
+
+        // Create a deep-mark span in the source node pointing to this wrapper
+        try {
+          const dm = createDeepMarkFromSelection(wrapper.id);
+          if (dm) {
+            // attach deep mark id to the DEEP_DIVES entry for convenience
+            DEEP_DIVES[DEEP_DIVES.length - 1].deepMarkId = dm.id;
+          }
+        } catch (e) {
+          console.warn('Failed to create deep mark for selection:', e);
+        }
 
         // Re-render and scroll to Overview
         if (NAV_MODE === 'leftnav') {
@@ -3518,7 +3702,7 @@ Requirements:
         if (levelContent) {
           levelContentDiv.innerHTML = renderMarkdown(levelContent);
           // Process math expressions with MathJax (slight delay to ensure DOM insertion)
-          setTimeout(() => { typesetMath(levelContentDiv); try { applyHighlightsForNode(node.id); } catch(e){} }, 30);
+          setTimeout(() => { typesetMath(levelContentDiv); try { applyHighlightsForNode(node.id); applyAnnotationsForNode(node.id); applyDeepMarksForNode(node.id); } catch(e){} }, 30);
         } else if (LEVEL_READING.has(`${node.id}@${activeLevel}`)) {
           levelContentDiv.innerHTML = "<p><em>Loading...</em></p>";
         } else {
@@ -3555,7 +3739,7 @@ Requirements:
         wrap.appendChild(rb);
   // Process math expressions with MathJax (short delay)
   setTimeout(() => typesetMath(rb), 30);
-    setTimeout(() => { try { applyHighlightsForNode(node.id); } catch(e){} }, 60);
+  setTimeout(() => { try { applyHighlightsForNode(node.id); applyAnnotationsForNode(node.id); applyDeepMarksForNode(node.id); } catch(e){} }, 60);
         }
 
       // Add chat interface (always show for nodes with content or levels enabled)
@@ -4133,7 +4317,14 @@ Requirements:
     // Selection toolbar event listeners
     $("btnDiveDeep").addEventListener("click", diveDeep);
   $("btnHighlightSelection").addEventListener("click", () => { createHighlightFromSelection(); });
-    $("btnAnnotateSelection").addEventListener('click', (ev) => { ev.stopPropagation(); if (currentSelection) openAnnotationEditor(null); });
+    $("btnAnnotateSelection").addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (!currentSelection) return;
+      // If the selection was created from clicking an existing annotated span,
+      // prefer editing that annotation instead of creating a new one.
+      const aid = currentSelection.annotationId || null;
+      openAnnotationEditor(aid);
+    });
     $("btnCopySelection").addEventListener("click", copySelection);
     $("btnAskAboutSelection").addEventListener("click", askAboutSelection);
 
@@ -4206,6 +4397,11 @@ Requirements:
 
     // Selection handling
     document.addEventListener("selectionchange", () => {
+      // If user recently clicked an annotated/deep-marked span, prefer the prepared currentSelection
+      if (window._annoClickKeep && currentSelection && (currentSelection.annotationId || currentSelection.deepId)) {
+        showSelectionToolbar(currentSelection);
+        return;
+      }
       const selectionInfo = getSelectionInfo();
       if (selectionInfo) {
         showSelectionToolbar(selectionInfo);
@@ -4217,6 +4413,11 @@ Requirements:
     // Also handle mouseup for better selection detection
     document.addEventListener("mouseup", () => {
       setTimeout(() => {
+        // If user recently clicked an annotated/deep-marked span, keep the toolbar for that selection
+        if (window._annoClickKeep && currentSelection && (currentSelection.annotationId || currentSelection.deepId)) {
+          showSelectionToolbar(currentSelection);
+          return;
+        }
         const selectionInfo = getSelectionInfo();
         if (selectionInfo) {
           showSelectionToolbar(selectionInfo);
@@ -4226,11 +4427,13 @@ Requirements:
       }, 10); // Small delay to ensure selection is complete
     });
 
-    // Hide toolbar on click outside
+    // Hide toolbar on click outside, but don't hide when clicking an annotated span
     document.addEventListener("click", (e) => {
-      if (!e.target.closest("#selectionToolbar")) {
-        hideSelectionToolbar();
-      }
+      // If click was inside the toolbar, keep it
+      if (e.target.closest && e.target.closest("#selectionToolbar")) return;
+      // If click was on an annotated span, don't hide (we handle showing toolbar separately)
+      if (e.target.closest && e.target.closest('span.annotated')) return;
+      hideSelectionToolbar();
     });
 
     // Modal close on outside click
