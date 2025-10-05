@@ -4760,6 +4760,39 @@ Requirements:
         updateUndoButton();
   // Ensure Delete button state reflects whether a notebook is saved
   updateDeleteButtonState();
+
+        // Keyboard shortcuts: Ctrl/Cmd + S => Save, Ctrl/Cmd + N => New Notebook, Ctrl/Cmd + O => Open Notebook
+        // Use a capturing, non-passive listener on window and stop immediate propagation so we can reliably
+        // prevent the browser's default actions (e.g., Ctrl+N opens a new window).
+        const __kbHandler = (ev) => {
+          try {
+            const key = (ev.key || '').toLowerCase();
+            const isMod = ev.ctrlKey || ev.metaKey; // support Ctrl on Windows/Linux and Cmd on Mac
+            if (!isMod) return;
+
+            // Optional: avoid interfering while typing in inputs/textareas/contenteditable
+            const active = document.activeElement;
+            const editingEl = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+            // If you want shortcuts to still work while typing, set this to false. For now, allow shortcuts globally.
+            // if (editingEl) return;
+
+            if (key === 's') {
+              ev.preventDefault(); ev.stopImmediatePropagation();
+              try { saveNotebook(); } catch (e) { console.error('Save shortcut failed', e); }
+            } else if (key === 'm') {
+              ev.preventDefault(); ev.stopImmediatePropagation();
+              try { newNotebookInNewTab(); } catch (e) { console.error('New shortcut failed', e); }
+            } else if (key === 'o') {
+              ev.preventDefault(); ev.stopImmediatePropagation();
+              try { openNotebook(); } catch (e) { console.error('Open shortcut failed', e); }
+            }
+          } catch (err) {
+            console.error('Keyboard shortcut handler error:', err);
+          }
+        };
+        // Use capture: true and passive: false so preventDefault() is honored early in event flow
+        window.addEventListener('keydown', __kbHandler, { capture: true, passive: false });
+
         console.log("Topic Browser initialized successfully");
       } catch (error) {
         console.error("Error initializing Topic Browser:", error);
