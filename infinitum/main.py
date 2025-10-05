@@ -7,10 +7,24 @@ from dotenv import load_dotenv
 import requests
 from openai import OpenAI
 
+# Optional token counter using tiktoken for accurate truncation when available
+try:
+    import tiktoken
+    _HAS_TIKTOKEN = True
+except Exception:
+    _HAS_TIKTOKEN = False
+
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")  # optional
+
+# Runtime mode: 'live' (calls OpenAI) or 'dev' (calls a dev server that mimics OpenAI)
+MODE = os.getenv('INFITUM_ENV', 'live')
+DEV_SERVER = os.getenv('INFITUM_DEV_SERVER', '')
+DEV_MODEL = os.getenv('INFITUM_DEV_MODEL', 'stabilityai/stablelm-zephyr-3b')
+DEV_MAX_PROMPT_CHARS = int(os.getenv('INFITUM_DEV_MAX_PROMPT_CHARS', '1200'))
+DEV_MAX_PROMPT_TOKENS = int(os.getenv('INFITUM_DEV_MAX_PROMPT_TOKENS', '0'))
 
 # Initialize OpenAI client
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -50,49 +64,242 @@ def _ensure_ids(nodes, seen=None, prefix=""):
 
 def _chat_json(model, temperature, system, user):
     """Call OpenAI chat.completions expecting JSON content."""
-    if not OPENAI_API_KEY:
-        abort(400, "OPENAI_API_KEY is not configured on the server.")
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "temperature": temperature,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-    }
-    r = requests.post(url, headers=headers, json=payload, timeout=60)
-    if not r.ok:
-        abort(r.status_code, r.text)
-    data = r.json()
-    content = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content", "") or "{}"
-    return json.loads(content), data
+    # Choose target URL depending on MODE
+    headers = {"Content-Type": "application/json"}
+    if OPENAI_API_KEY:
+        headers["Authorization"] = f"Bearer {OPENAI_API_KEY}"
+
+    if MODE == 'dev':
+        if not DEV_SERVER:
+            abort(500, "DEV server URL not configured (pass --server when running in dev mode)")
+        # Many dev model servers expect the completions-style endpoint with a single prompt string.
+        # Map the system + user to a single prompt for /v1/completions
+        url = DEV_SERVER.rstrip('/') + '/v1/completions'
+        prompt = (system or "") + "\n\n" + (user or "")
+        # Truncate overly long prompt for small-context dev models.
+        # Prefer token-based truncation if configured; otherwise fallback to char-based truncation.
+        def _truncate_middle_chars(s, max_chars):
+            if not s or len(s) <= max_chars:
+                return s
+            half = max_chars // 2
+            return s[:half] + "\n\n...[truncated context]...\n\n" + s[-half:]
+
+        def _truncate_by_tokens(s, max_tokens):
+            if not s or max_tokens <= 0:
+                return s
+            # Use tiktoken if available for accurate token counts and decoding
+            if _HAS_TIKTOKEN:
+                try:
+                    enc = tiktoken.get_encoding('cl100k_base')
+                    token_ids = enc.encode(s)
+                    if len(token_ids) <= max_tokens:
+                        return s
+                    head = max_tokens // 2
+                    tail = max_tokens - head
+                    head_dec = enc.decode(token_ids[:head])
+                    tail_dec = enc.decode(token_ids[-tail:])
+                    return head_dec + "\n\n...[truncated context]...\n\n" + tail_dec
+                except Exception:
+                    pass
+            # Fallback approximate by words
+            words = s.split()
+            if len(words) <= max_tokens:
+                return s
+            head = max_tokens // 2
+            tail = max_tokens - head
+            return ' '.join(words[:head]) + "\n\n...[truncated context]...\n\n" + ' '.join(words[-tail:])
+
+        if DEV_MAX_PROMPT_TOKENS and isinstance(DEV_MAX_PROMPT_TOKENS, int) and DEV_MAX_PROMPT_TOKENS > 0:
+            # Truncate by tokens
+            prompt_before = len(prompt)
+            prompt = _truncate_by_tokens(prompt, DEV_MAX_PROMPT_TOKENS)
+            if len(prompt) < prompt_before:
+                print(f"Truncated dev prompt to token limit {DEV_MAX_PROMPT_TOKENS}")
+        elif DEV_MAX_PROMPT_CHARS and isinstance(DEV_MAX_PROMPT_CHARS, int) and DEV_MAX_PROMPT_CHARS > 0:
+            if len(prompt) > DEV_MAX_PROMPT_CHARS:
+                print(f"Truncating dev prompt from {len(prompt)} to {DEV_MAX_PROMPT_CHARS} chars")
+                prompt = _truncate_middle_chars(prompt, DEV_MAX_PROMPT_CHARS)
+        model_to_use = DEV_MODEL if DEV_MODEL else model
+        payload = {
+            "model": model_to_use,
+            "prompt": prompt,
+            "temperature": temperature,
+            # allow the server to choose token limits; include a reasonable max by default
+            "max_tokens": 800
+        }
+        # Debug logging to help diagnose 404/Not Found from dev servers
+        try:
+            print(f"DEV -> POST {url}")
+            print("DEV -> payload:", (payload if len(str(payload)) < 2000 else str(payload)[:2000] + '...'))
+            print("DEV -> headers:", {k: ('<REDACTED>' if k.lower() == 'authorization' else v) for k, v in headers.items()})
+        except Exception:
+            pass
+
+        def do_post(p):
+            rr = requests.post(url, headers=headers, json=p, timeout=60)
+            return rr
+
+        r = do_post(payload)
+
+        # If model-not-found (404 from some dev servers), try fallback DEV_MODEL if different
+        if r.status_code == 404 and DEV_MODEL and payload.get('model') != DEV_MODEL:
+            print(f"Dev server reported 404 for model {payload.get('model')}, retrying with {DEV_MODEL}")
+            payload['model'] = DEV_MODEL
+            r = do_post(payload)
+
+        if not r.ok:
+            print(f"DEV server returned status {r.status_code}")
+            try:
+                print("DEV response body:", r.text)
+            except Exception:
+                pass
+            abort(r.status_code, r.text)
+
+        data = r.json()
+        print("DEV response data:", data)
+        # Accept multiple shapes: choices[0].text or choices[0].message.content
+        choice0 = data.get('choices', [{}])[0] or {}
+        text = choice0.get('text') or (choice0.get('message') or {}).get('content') or ''
+
+        # Try to parse JSON from the returned text. Handle common dev-server formats:
+        # - Raw JSON
+        # - JSON inside a ```json ... ``` fenced code block
+        # - JSON embedded somewhere in the text (first {...} match)
+        import re
+        txt = (text or "").strip()
+
+        # Direct parse
+        try:
+            parsed = json.loads(txt)
+            return parsed, data
+        except Exception:
+            pass
+
+        # Fenced ```json ... ``` blocks
+        m = re.search(r"```json\s*([\s\S]*?)```", txt, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            try:
+                parsed = json.loads(candidate)
+                return parsed, data
+            except Exception:
+                pass
+
+        # First JSON object substring (non-greedy)
+        m2 = re.search(r"\{[\s\S]*?\}", txt)
+        if m2:
+            candidate = m2.group(0)
+            try:
+                parsed = json.loads(candidate)
+                return parsed, data
+            except Exception:
+                pass
+
+        # As a last attempt, try parsing choice.message.content directly
+        try:
+            alt = (choice0.get('message') or {}).get('content', '')
+            parsed = json.loads(alt or "{}")
+            return parsed, data
+        except Exception:
+            abort(500, f"Dev server returned invalid JSON in completions text; raw text starts: {txt[:400]}")
+    else:
+        # Live OpenAI Chat completions path (chat messages + JSON response format)
+        url = 'https://api.openai.com/v1/chat/completions'
+        payload = {
+            "model": model,
+            "temperature": temperature,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
+        if not r.ok:
+            abort(r.status_code, r.text)
+        data = r.json()
+        content = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content", "") or "{}"
+        return json.loads(content), data
 
 def _chat_text(model, temperature, system, messages):
     """Call OpenAI chat.completions expecting text output."""
-    if not OPENAI_API_KEY:
-        abort(400, "OPENAI_API_KEY is not configured on the server.")
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "temperature": temperature,
-        "messages": [{"role": "system", "content": system}] + messages,
-    }
-    r = requests.post(url, headers=headers, json=payload, timeout=60)
-    if not r.ok:
-        abort(r.status_code, r.text)
-    data = r.json()
-    content = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content", "") or ""
-    return content, data
+    # Choose target URL depending on MODE
+    headers = {"Content-Type": "application/json"}
+    if OPENAI_API_KEY:
+        headers["Authorization"] = f"Bearer {OPENAI_API_KEY}"
+
+    if MODE == 'dev':
+        if not DEV_SERVER:
+            abort(500, "DEV server URL not configured (pass --server when running in dev mode)")
+        # Map chat-style messages into a single prompt for completions endpoint.
+        url = DEV_SERVER.rstrip('/') + '/v1/completions'
+        # Build a readable prompt: include system then recent messages
+        parts = [system or ""]
+        for m in messages:
+            role = m.get('role', 'user')
+            content = m.get('content', '')
+            parts.append(f"{role}: {content}")
+        prompt = "\n\n".join(parts)
+        model_to_use = DEV_MODEL if DEV_MODEL else model
+        payload = {
+            "model": model_to_use,
+            "prompt": prompt,
+            "temperature": temperature,
+            "max_tokens": 800
+        }
+        # Truncate prompt for small dev contexts
+        def _truncate_middle(s, max_chars):
+            if not s or len(s) <= max_chars:
+                return s
+            half = max_chars // 2
+            return s[:half] + "\n\n...[truncated context]...\n\n" + s[-half:]
+
+        if DEV_MAX_PROMPT_CHARS and isinstance(DEV_MAX_PROMPT_CHARS, int) and DEV_MAX_PROMPT_CHARS > 0:
+            if len(payload['prompt']) > DEV_MAX_PROMPT_CHARS:
+                print(f"Truncating dev prompt from {len(payload['prompt'])} to {DEV_MAX_PROMPT_CHARS} chars")
+                payload['prompt'] = _truncate_middle(payload['prompt'], DEV_MAX_PROMPT_CHARS)
+        try:
+            print(f"DEV -> POST {url}")
+            print("DEV -> payload:", (payload if len(str(payload)) < 2000 else str(payload)[:2000] + '...'))
+            print("DEV -> headers:", {k: ('<REDACTED>' if k.lower() == 'authorization' else v) for k, v in headers.items()})
+        except Exception:
+            pass
+
+        def do_post(p):
+            return requests.post(url, headers=headers, json=p, timeout=60)
+
+        r = do_post(payload)
+        # retry with DEV_MODEL if model-not-found
+        if r.status_code == 404 and DEV_MODEL and payload.get('model') != DEV_MODEL:
+            print(f"Dev server reported 404 for model {payload.get('model')}, retrying with {DEV_MODEL}")
+            payload['model'] = DEV_MODEL
+            r = do_post(payload)
+
+        if not r.ok:
+            print(f"DEV server returned status {r.status_code}")
+            try:
+                print("DEV response body:", r.text)
+            except Exception:
+                pass
+            abort(r.status_code, r.text)
+
+        data = r.json()
+        choice0 = data.get('choices', [{}])[0] or {}
+        text = choice0.get('text') or (choice0.get('message') or {}).get('content') or ''
+        return text, data
+    else:
+        url = 'https://api.openai.com/v1/chat/completions'
+        payload = {
+            "model": model,
+            "temperature": temperature,
+            "messages": [{"role": "system", "content": system}] + messages,
+        }
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
+        if not r.ok:
+            abort(r.status_code, r.text)
+        data = r.json()
+        content = (data.get("choices", [{}])[0].get("message", {}) or {}).get("content", "") or ""
+        return content, data
 
 @app.route("/")
 def index():
@@ -647,21 +854,11 @@ Return ONLY a JSON object with:
 Focus on whether a single static image would materially improve learning for most people.
 """
         
-        response = client.chat.completions.create(
-            model=body.get("model", "gpt-4o"),
-            messages=[
-                {"role": "system", "content": "You are a visual pedagogy classifier. Return only valid JSON with ok, score, and rationale fields."},
-                {"role": "user", "content": eligibility_prompt}
-            ],
-            temperature=0.2,
-            max_tokens=200,
-            response_format={"type": "json_object"}
-        )
-        
-        result = response.choices[0].message.content
-        eligibility_data = json.loads(result)
-        
-        return jsonify(eligibility_data)
+        # Use helper to call chat API (OpenAI or DEV server depending on MODE)
+        parsed, raw = _chat_json(body.get("model", "gpt-4o"), 0.2,
+                                "You are a visual pedagogy classifier. Return only valid JSON with ok, score, and rationale fields.",
+                                eligibility_prompt)
+        return jsonify(parsed)
         
     except Exception as e:
         # Return safe default on error
@@ -730,18 +927,10 @@ Requirements:
 - Use clear, descriptive language for image generation
 """
         
-        planning_response = client.chat.completions.create(
-            model=body.get("model", "gpt-4o"),
-            messages=[
-                {"role": "system", "content": "You are an educational diagram planner. Return only valid JSON with prompt and caption fields."},
-                {"role": "user", "content": planning_prompt}
-            ],
-            temperature=0.3,
-            max_tokens=300,
-            response_format={"type": "json_object"}
-        )
-        
-        planning_result = json.loads(planning_response.choices[0].message.content)
+        parsed_plan, raw = _chat_json(body.get("model", "gpt-4o"), 0.3,
+                                      "You are an educational diagram planner. Return only valid JSON with prompt and caption fields.",
+                                      planning_prompt)
+        planning_result = parsed_plan
         image_prompt = planning_result.get("prompt", "")
         caption = planning_result.get("caption", "")
         
@@ -763,15 +952,27 @@ Requirements:
         # Step B: Generate image using OpenAI Images API
         try:
             print(f"Generating image for {node.get('title', '')} with prompt: {image_prompt[:100]}...")
-            image_response = client.images.generate(
-                model="dall-e-3",
-                prompt=image_prompt,
-                size="1024x1024",
-                quality="standard",
-                n=1
-            )
-            
-            image_url = image_response.data[0].url
+            # Image generation: delegate to DEV server if in dev mode, otherwise use OpenAI client
+            if MODE == 'dev':
+                if not DEV_SERVER:
+                    abort(500, "DEV server URL not configured for image generation")
+                img_url = DEV_SERVER.rstrip('/') + '/v1/images.generate'
+                img_payload = {"model": "dall-e-3", "prompt": image_prompt, "size": "1024x1024", "n": 1}
+                img_resp = requests.post(img_url, json=img_payload, timeout=60)
+                if not img_resp.ok:
+                    raise Exception(f"Image generation failed: {img_resp.status_code} {img_resp.text}")
+                img_data = img_resp.json()
+                # Expect OpenAI-like response shape
+                image_url = img_data.get('data', [{}])[0].get('url')
+            else:
+                image_response = client.images.generate(
+                    model="dall-e-3",
+                    prompt=image_prompt,
+                    size="1024x1024",
+                    quality="standard",
+                    n=1
+                )
+                image_url = image_response.data[0].url
             print(f"Image generated successfully: {image_url}")
             
             # Cache the result
@@ -838,17 +1039,11 @@ Requirements:
 - Focus on the most important information
 """
         
-        response = client.chat.completions.create(
-            model=body.get("model", "gpt-4o"),
-            messages=[
-                {"role": "system", "content": "You are an expert at creating concise, informative summaries. Always provide exactly 3-4 sentences that capture the essence of the content."},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=body.get("temperature", 0.3),
-            max_tokens=300
-        )
-        
-        summary = response.choices[0].message.content.strip()
+        # Use helper to call chat in text mode
+        summary, raw = _chat_text(body.get("model", "gpt-4o"), body.get("temperature", 0.3),
+                                 "You are an expert at creating concise, informative summaries. Always provide exactly 3-4 sentences that capture the essence of the content.",
+                                 [{"role": "user", "content": user_prompt}])
+        summary = summary.strip()
         
         return jsonify({
             "summary": summary,
@@ -859,5 +1054,21 @@ Requirements:
         return jsonify({"error": f"Summary generation failed: {str(e)}"}), 500
 
 if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Infinitum server")
+    parser.add_argument("--env", choices=["live", "dev"], default=os.getenv('INFITUM_ENV', 'live'),
+                        help="Runtime environment: 'live' (call OpenAI) or 'dev' (call a local dev model server)")
+    parser.add_argument("--server", default=os.getenv('INFITUM_DEV_SERVER', ''),
+                        help="When --env dev, the dev server base URL (e.g., http://localhost:9000)")
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "5050")), help="Port to listen on")
+    args = parser.parse_args()
+
+    MODE = args.env
+    DEV_SERVER = args.server or ""
+
+    # Informational print
+    print(f"Starting server in MODE={MODE} DEV_SERVER={DEV_SERVER or '<none>'}")
+
     # For local dev only
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5050")), debug=True)
+    app.run(host="0.0.0.0", port=args.port, debug=(MODE == 'dev'))
