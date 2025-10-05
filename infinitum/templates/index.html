@@ -504,6 +504,40 @@
     .action-item input[type="checkbox"] {
       margin: 0;
     }
+    /* Global spinner overlay used for long-running actions (e.g., Deep Dive) */
+    .global-spinner-overlay {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 3000;
+      pointer-events: auto;
+    }
+    .spinner {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      border: 6px solid rgba(255,255,255,0.15);
+      border-top-color: #ffffff;
+      animation: spin 1s linear infinite;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.2);
+    }
+    .spinner-label {
+      margin-top: 12px;
+      color: #fff;
+      font-weight: 600;
+      font-size: 14px;
+      text-align: center;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
     
     
   </style>
@@ -665,6 +699,14 @@
       <div id="modalBody">
         <div class="modal-loading">Generating visualization...</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Global spinner overlay (hidden by default) -->
+  <div id="globalSpinnerOverlay" class="global-spinner-overlay" style="display:none;" aria-hidden="true">
+    <div style="text-align:center;">
+      <div class="spinner" role="status" aria-label="Loading"></div>
+      <div class="spinner-label">Working…</div>
     </div>
   </div>
 
@@ -2307,7 +2349,11 @@ Requirements:
       
       const nodeId = currentSelection.nodeId;
       const node = findNodeById(CURRENT_TOC, nodeId);
-      if (!node) return;
+      if (!node) {
+        if (diveBtn) { diveBtn.classList.remove('loading'); diveBtn.disabled = false; }
+        hideGlobalSpinner();
+        return;
+      }
 
       // Find the chat container for this node
       const nodeContainer = currentSelection.nodeContainer;
@@ -2980,8 +3026,9 @@ Requirements:
     async function diveDeep() {
       const diveBtn = document.getElementById('btnDiveDeep');
       if (!currentSelection) return;
-      // Indicate loading/active state
+      // Indicate loading/active state and show global spinner overlay
       if (diveBtn) { diveBtn.classList.add('loading'); diveBtn.disabled = true; }
+      showGlobalSpinner();
       
       const selectionInfo = currentSelection;
       const nodeId = selectionInfo.nodeId;
@@ -3007,13 +3054,14 @@ Requirements:
               }
               hideSelectionToolbar();
               if (diveBtn) { diveBtn.classList.remove('loading'); diveBtn.disabled = false; }
+              hideGlobalSpinner();
               return;
             }
           }
         }
       }
 
-      // Deep dive confirmed - proceed directly
+  // Deep dive confirmed - proceed directly
 
       try {
         const topic = $("inpTopic").value.trim();
@@ -3235,7 +3283,32 @@ Requirements:
         hideSelectionToolbar();
       } finally {
         if (diveBtn) { diveBtn.classList.remove('loading'); diveBtn.disabled = false; }
+        // Ensure spinner is always hidden after operation completes
+        hideGlobalSpinner();
       }
+    }
+
+    // Show/hide helpers for the global spinner overlay
+    function showGlobalSpinner(label) {
+      try {
+        const overlay = document.getElementById('globalSpinnerOverlay');
+        if (!overlay) return;
+        if (label) {
+          const lbl = overlay.querySelector('.spinner-label');
+          if (lbl) lbl.textContent = label;
+        }
+        overlay.style.display = 'flex';
+        overlay.setAttribute('aria-hidden', 'false');
+      } catch (e) { console.warn('showGlobalSpinner failed', e); }
+    }
+
+    function hideGlobalSpinner() {
+      try {
+        const overlay = document.getElementById('globalSpinnerOverlay');
+        if (!overlay) return;
+        overlay.style.display = 'none';
+        overlay.setAttribute('aria-hidden', 'true');
+      } catch (e) { console.warn('hideGlobalSpinner failed', e); }
     }
 
     // ----------------------- Visualization Functions -----------------------
