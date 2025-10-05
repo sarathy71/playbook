@@ -809,6 +809,27 @@ def api_notebook_list():
     items.sort(key=lambda x: x.get('updatedAt') or '', reverse=True)
     return jsonify({'notebooks': items})
 
+
+@app.post("/api/notebook/delete")
+def api_notebook_delete():
+    """Delete a notebook file by id from server storage."""
+    body = request.get_json(force=True, silent=True) or {}
+    notebook_id = body.get('id')
+    NOTEBOOK_DIR = os.getenv("NOTEBOOK_DIR", "notebooks")
+    if not notebook_id:
+        abort(400, "Notebook ID is required for deletion")
+
+    path = os.path.join(NOTEBOOK_DIR, f"{notebook_id}.json")
+    if not os.path.exists(path):
+        abort(404, "Notebook not found")
+
+    try:
+        os.remove(path)
+    except Exception as e:
+        abort(500, f"Failed to delete notebook: {e}")
+
+    return jsonify({"id": notebook_id, "deleted": True, "message": "Notebook deleted"})
+
 @app.route("/api/visualize/eligibility", methods=["POST"])
 def visualize_eligibility():
     """Determine if a node would benefit from visualization"""

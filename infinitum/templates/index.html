@@ -601,6 +601,7 @@
           <div class="settings-row">
         <button id="btnCopy" onclick="copyJSON()">Copy JSON</button>
         <button id="btnSave" onclick="saveNotebook()">Save Notebook</button>
+        <button id="btnDeleteNotebook" onclick="deleteNotebook()">Delete Notebook</button>
         <button id="btnNewNotebook" onclick="newNotebookInNewTab()">New Notebook</button>
         </div>
           <div class="settings-row">
@@ -1286,6 +1287,7 @@ Requirements:
             const data = await resp.json();
             // update stored info
             LAST_SAVED_NOTEBOOK_ID = data.id || LAST_SAVED_NOTEBOOK_ID;
+            updateDeleteButtonState();
             localStorage.setItem('lastSavedNotebookId', LAST_SAVED_NOTEBOOK_ID);
             localStorage.setItem('lastSavedNotebookName', data.name || notebook.config.topic || 'untitled');
             console.log('Auto-saved notebook', data);
@@ -1329,6 +1331,7 @@ Requirements:
           const data = await resp.json();
           // remember last saved id/name locally for UX so next saves auto-overwrite
           LAST_SAVED_NOTEBOOK_ID = data.id;
+          updateDeleteButtonState();
           localStorage.setItem('lastSavedNotebookId', data.id);
           localStorage.setItem('lastSavedNotebookName', data.name || name);
           console.log('Saved notebook', data);
@@ -1355,6 +1358,48 @@ Requirements:
       } catch (e) {
         console.error("Failed to save notebook:", e);
         showError(`Failed to save notebook: ${e.message}`);
+      }
+    }
+
+    // Delete the current notebook (server-backed) or clear autosave and start fresh
+    async function deleteNotebook() {
+      try {
+        const confirmed = confirm('Delete this notebook? This cannot be undone.');
+        if (!confirmed) return;
+
+        // If this notebook has a server id, request server to delete
+        if (LAST_SAVED_NOTEBOOK_ID) {
+          try {
+            const resp = await fetch('/api/notebook/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: LAST_SAVED_NOTEBOOK_ID })
+            });
+            if (!resp.ok) throw new Error(await resp.text());
+            // Clear local saved metadata
+              LAST_SAVED_NOTEBOOK_ID = null;
+              updateDeleteButtonState();
+            localStorage.removeItem('lastSavedNotebookId');
+            localStorage.removeItem('lastSavedNotebookName');
+            showToast('Notebook deleted', 'success');
+          } catch (e) {
+            console.error('Failed to delete notebook on server:', e);
+            showToast('Failed to delete notebook: ' + (e.message || ''), 'error');
+            return;
+          }
+        } else {
+          // No server-backed notebook: clear autosave and local snapshot
+          localStorage.removeItem(AUTOSAVE_KEY);
+          LAST_SAVED_SNAPSHOT = null;
+          updateDeleteButtonState();
+          showToast('Local notebook cleared', 'success');
+        }
+
+        // Redirect to a fresh notebook (root)
+        window.location.href = '/';
+      } catch (e) {
+        console.error('deleteNotebook failed:', e);
+        showToast('Delete failed: ' + (e.message || ''), 'error');
       }
     }
 
@@ -1449,6 +1494,24 @@ Requirements:
         setTimeout(() => btn.classList.remove('save-error'), 1000);
       } else {
         // pending — no-op or you could add a spinner
+      }
+    }
+
+    // Enable/disable Delete Notebook button based on whether the notebook is saved to server
+    function updateDeleteButtonState() {
+      const btn = document.getElementById('btnDeleteNotebook');
+      if (!btn) return;
+      // If LAST_SAVED_NOTEBOOK_ID isn't set in memory, check localStorage for the last saved id
+      const localStorageId = localStorage.getItem('lastSavedNotebookId');
+      const effectiveId = LAST_SAVED_NOTEBOOK_ID || localStorageId;
+      // Debugging help: log values to console so UI state issues can be diagnosed
+      console.debug('updateDeleteButtonState', { LAST_SAVED_NOTEBOOK_ID, localStorageId, effectiveId });
+      if (effectiveId) {
+        btn.disabled = false;
+        btn.classList.remove('disabled');
+      } else {
+        btn.disabled = true;
+        btn.classList.add('disabled');
       }
     }
 
@@ -4280,6 +4343,8 @@ Requirements:
               console.warn('URL notebook check failed:', e);
             }
         updateUndoButton();
+  // Ensure Delete button state reflects whether a notebook is saved
+  updateDeleteButtonState();
         console.log("Topic Browser initialized successfully");
       } catch (error) {
         console.error("Error initializing Topic Browser:", error);
