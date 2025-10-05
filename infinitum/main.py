@@ -711,6 +711,47 @@ Style guidelines:
         "tokens": raw.get("usage")
     })
 
+
+@app.post("/api/quickdive")
+def api_quickdive():
+    """Create a short 2-3 paragraph overview + key topics for a selected text.
+       Returns plain Markdown/text in the `content` field."""
+    body = request.get_json(force=True, silent=True) or {}
+    topic = body.get("topic", "").strip()
+    node = body.get("node", {})
+    path = body.get("path", [])
+    audience = body.get("audience", "general")
+    model = body.get("model", "gpt-4.1-mini")
+    temperature = float(body.get("temperature", 0.3))
+    selection = (body.get("selection") or {}).get("text", "").strip()
+
+    if not selection:
+        abort(400, "Selection text is required for quick dive")
+
+    # Keep prompt concise and ask for 2-3 short paragraphs + key topics + example if useful
+    user_prompt = f"""
+You are an expert explainer. Given the following short selected text, produce a concise quick overview intended for a reader familiar with the surrounding topic.
+
+Selected text:
+""" + selection + """
+
+Requirements:
+- Provide a clear 2-3 paragraph overview (each paragraph short, easy to scan).
+- After the overview, include a short "Key topics" section listing the main topics or concepts (3-6 bullet points).
+- If an illustrative example helps, include a single short example at the end under an "Example" heading.
+- Use Markdown formatting (paragraphs, a bullet list for Key topics, and an optional Example section).
+- Keep the language accessible and focused; do not produce JSON or extra metadata.
+""".strip()
+
+    try:
+        content, raw = _chat_text(model, temperature,
+                                 "You are a clear, concise explainer. Produce 2-3 short paragraphs, followed by a Key topics list and an optional short Example.",
+                                 [{"role": "user", "content": user_prompt}])
+    except Exception as e:
+        abort(500, f"Quick dive generation failed: {e}")
+
+    return jsonify({"content": content})
+
 @app.post("/api/notebook/save")
 def api_notebook_save():
     """Save a notebook to server storage (optional cloud persistence)."""

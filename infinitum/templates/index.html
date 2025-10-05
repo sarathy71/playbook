@@ -647,7 +647,8 @@
 
   <!-- Selection Toolbar -->
   <div id="selectionToolbar" class="selection-toolbar">
-    <button id="btnDiveDeep" class="primary">Dive Deep</button>
+    <button id="btnDiveDeep">Dive Deep</button>
+    <button id="btnQuickDive">Quick Dive</button>
     <button id="btnHighlightSelection">Highlight</button>
     <button id="btnAnnotateSelection">Annotate</button>
     <button id="btnCopySelection">Copy</button>
@@ -663,6 +664,19 @@
       </div>
       <div id="modalBody">
         <div class="modal-loading">Generating visualization...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Dive Modal -->
+  <div id="quickDiveModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="modal-title">Quick Dive</div>
+        <span class="modal-close" onclick="closeQuickDiveModal()">&times;</span>
+      </div>
+      <div id="quickDiveBody">
+        <div class="modal-loading">Generating quick overview...</div>
       </div>
     </div>
   </div>
@@ -939,7 +953,8 @@ Requirements:
     const VIDEOS = new Map();       // nodeId -> [{title, channel, duration, thumbnail, url}]
     const FETCHING_VIDEOS = new Set(); // nodeId -> in-flight video fetch
     const RUNS_HISTORY = [];        // [{ts, model, temperature, tokens, requestSummary}]
-    const DEEP_DIVES = [];          // [{nodeId, selection: {text, snippet, offsets}, createdAt, newChildIds}]
+  const DEEP_DIVES = [];          // [{nodeId, selection: {text, snippet, offsets}, createdAt, newChildIds, quickContent}]
+  const QUICK_DIVE_CACHE = new Map(); // normalizedSelectionText -> { content, createdAt, deepMarkId }
     const DEEP_WITH_CONTEXT = new Set(); // nodeId -> whether deep-dive should include parent/context
     const UNDO_STACK = [];          // [{type, parentId, childrenIds, timestamp}]
     const LEVELS_ENABLED = new Set(); // nodeId → whether Levels UI is enabled
@@ -1066,6 +1081,7 @@ Requirements:
         videos,
         runs: RUNS_HISTORY,
         deepDives: DEEP_DIVES,
+  quickDiveCache: (function(){ const o = {}; for (const [k,v] of QUICK_DIVE_CACHE) o[k]=v; return o; })(),
   deepWithContext,
         levelsEnabled,
         activeLevel,
@@ -1107,6 +1123,13 @@ Requirements:
       BREAD = notebook.bread || [];
       RUNS_HISTORY.splice(0, RUNS_HISTORY.length, ...(notebook.runs || []));
       DEEP_DIVES.splice(0, DEEP_DIVES.length, ...(notebook.deepDives || []));
+      // Restore quick dive cache
+      QUICK_DIVE_CACHE.clear();
+      if (notebook.quickDiveCache) {
+        for (const [k, v] of Object.entries(notebook.quickDiveCache)) {
+          QUICK_DIVE_CACHE.set(k, v);
+        }
+      }
       
       // Restore levels state
       LEVELS_ENABLED.clear();
@@ -4316,6 +4339,7 @@ Requirements:
 
     // Selection toolbar event listeners
     $("btnDiveDeep").addEventListener("click", diveDeep);
+  $("btnQuickDive").addEventListener("click", quickDive);
   $("btnHighlightSelection").addEventListener("click", () => { createHighlightFromSelection(); });
     $("btnAnnotateSelection").addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -4457,6 +4481,10 @@ Requirements:
           diveDeep();
         }
       }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'q' || e.key === 'Q')) {
+        e.preventDefault();
+        if (currentSelection) quickDive();
+      }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) {
         e.preventDefault();
         if (currentSelection) {
@@ -4467,6 +4495,117 @@ Requirements:
         hideSelectionToolbar();
       }
     });
+
+    // Quick Dive functions
+    async function quickDive() {
+      const qBtn = document.getElementById('btnQuickDive');
+      if (!currentSelection) return;
+      if (qBtn) { qBtn.classList.add('loading'); qBtn.disabled = true; }
+
+      // Helper to normalize selection text into a cache key
+      function normalizeKey(s) { return (s || '').trim().replace(/\s+/g,' ').toLowerCase(); }
+
+      try {
+        const selectionInfo = currentSelection;
+        const nodeId = selectionInfo.nodeId;
+        const node = findNodeById(CURRENT_TOC, nodeId) || { id: nodeId, title: '' };
+        const path = getNodePath(nodeId);
+        const topic = $("inpTopic").value.trim();
+        const audience = $("inpAudience").value.trim() || "general";
+        const model = $("selModel").value;
+        const temperature = parseFloat($("inpTemp").value || "0.3");
+
+        const selKey = normalizeKey(selectionInfo.text);
+        let cacheEntry = QUICK_DIVE_CACHE.get(selKey) || null;
+
+        // Show cached content if present for snappy UX
+        if (cacheEntry && cacheEntry.content) {
+          showQuickDiveModal();
+          displayQuickDive(cacheEntry.content);
+        } else {
+          showQuickDiveModal();
+        }
+
+        // If cached, ensure deep mark exists and bookkeeping done
+        if (cacheEntry && cacheEntry.content) {
+          try {
+            if (!cacheEntry.deepMarkId) {
+              const prev = currentSelection;
+              try {
+                currentSelection = selectionInfo;
+                const dm = createDeepMarkFromSelection(null);
+                cacheEntry.deepMarkId = dm ? dm.id : null;
+              } finally { currentSelection = prev; }
+              try { applyDeepMarksForNode(node.id); } catch (e) {}
+              if (!DEEP_DIVES.find(dd => dd.newChildIds && dd.newChildIds.includes(cacheEntry.deepMarkId))) {
+                DEEP_DIVES.push({ nodeId: node.id, wrapperId: `${node.id}/quickdive-${Date.now().toString(36)}`, shortName: 'Quick Dive', overviewChildId: null, selection: { text: selectionInfo.text, snippet: selectionInfo.snippet }, createdAt: new Date().toISOString(), newChildIds: cacheEntry.deepMarkId ? [cacheEntry.deepMarkId] : [], quickContent: cacheEntry.content });
+              }
+            }
+          } catch (e) {
+            console.warn('Failed to materialize cached quick dive deep mark:', e);
+          }
+
+        } else {
+          // No cache: fetch from server, display, create deep-mark and cache result
+          const resp = await fetch('/api/quickdive', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ topic, audience, model, temperature, node: { id: node.id, title: node.title }, path, selection: { text: selectionInfo.text, snippet: selectionInfo.snippet } })
+          });
+          if (!resp.ok) throw new Error(await resp.text());
+          const data = await resp.json();
+          const content = data.content || 'No result.';
+          displayQuickDive(content);
+
+          // Create deep mark and cache the result
+          try {
+            const wrapperId = `${node.id}/quickdive-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
+            const prev = currentSelection;
+            let deepMarkId = null;
+            try {
+              currentSelection = selectionInfo;
+              const dm = createDeepMarkFromSelection(wrapperId);
+              deepMarkId = dm ? dm.id : null;
+            } finally { currentSelection = prev; }
+            try { applyDeepMarksForNode(node.id); } catch (e) {}
+
+            DEEP_DIVES.push({ nodeId: node.id, wrapperId, shortName: 'Quick Dive', overviewChildId: null, selection: { text: selectionInfo.text, snippet: selectionInfo.snippet }, createdAt: new Date().toISOString(), newChildIds: deepMarkId ? [deepMarkId] : [], quickContent: content });
+
+            QUICK_DIVE_CACHE.set(selKey, { content, createdAt: new Date().toISOString(), deepMarkId });
+          } catch (e) {
+            console.warn('Failed to persist quick dive deep mark or cache:', e);
+          }
+        }
+
+      } catch (e) {
+        console.error('Quick Dive failed:', e);
+        displayQuickDive(`<div class="muted danger">Quick Dive failed: ${escapeHtml(e.message || String(e))}</div>`);
+      } finally {
+        if (qBtn) { qBtn.classList.remove('loading'); qBtn.disabled = false; }
+        hideSelectionToolbar();
+      }
+    }
+
+    function showQuickDiveModal() {
+      const modal = $('quickDiveModal');
+      const body = $('quickDiveBody');
+      body.innerHTML = '<div class="modal-loading">Generating quick overview...</div>';
+      modal.style.display = 'block';
+    }
+
+    function displayQuickDive(markdownContent) {
+      const modalBody = $('quickDiveBody');
+      if (!modalBody) return;
+      const rendered = renderMarkdown(markdownContent || '');
+      modalBody.innerHTML = `<div class="modal-title"></div>` + `<div class="readbox">${rendered}</div>`;
+      // Typeset MathJax if needed
+      setTimeout(() => typesetMath(modalBody.querySelector('.readbox')).then(() => {}).catch(() => {}), 30);
+    }
+
+    function closeQuickDiveModal() {
+      const modal = $('quickDiveModal');
+      modal.style.display = 'none';
+    }
 
     // Settings panel toggle
     function toggleSettings() {
