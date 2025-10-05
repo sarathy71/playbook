@@ -143,6 +143,43 @@
       font-weight: 700;
       color: #374151;
     }
+    /* Highlighted selection style */
+    .highlighted {
+      background: #fff59d; /* gentle yellow */
+      border-radius: 2px;
+      padding: 0 2px;
+    }
+    /* Context menu for highlight actions */
+    .highlight-context-menu {
+      position: fixed;
+      z-index: 2000;
+      background: #fff;
+      border: 1px solid var(--ring);
+      border-radius: 8px;
+      padding: 6px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+      display: none;
+      min-width: 160px;
+      font-size: 13px;
+    }
+    .highlight-context-menu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 6px 8px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    .highlight-context-menu button:hover { background:#f3f4f6; }
+  .annotated { text-decoration: underline; text-decoration-color: #2563eb; text-decoration-thickness: 2px; cursor: pointer; }
+  /* Annotation editor modal (re-use modal styling but keep small) */
+  .annotation-modal { display:none; position:fixed; z-index:2100; left:50%; top:50%; transform:translate(-50%,-50%); background:#fff; border:1px solid var(--ring); border-radius:12px; padding:12px; min-width:320px; box-shadow:0 8px 24px rgba(0,0,0,0.12); }
+  .annotation-modal textarea { width:100%; min-height:120px; padding:8px; border:1px solid var(--ring); border-radius:8px; resize:vertical; }
+  .annotation-modal .actions { display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
+  .annotation-modal .actions button { padding:8px 10px; border-radius:8px; border:1px solid var(--ring); background:#fff; cursor:pointer; }
+  .annotation-modal .actions button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
     .deepdive-chip { display:inline-flex; align-items:center; gap:4px; background:#e3f2fd; color:#1565c0; font-size:10px; padding:2px 6px; border-radius:4px; margin-left:8px; }
     .deepdive-chip:hover { background:#bbdefb; }
     .undo-btn { font-size:11px; padding:4px 8px; border-radius:6px; border:1px solid var(--ring); background:#fff; cursor:pointer; color:var(--muted); }
@@ -610,6 +647,8 @@
   <!-- Selection Toolbar -->
   <div id="selectionToolbar" class="selection-toolbar">
     <button id="btnDiveDeep" class="primary">Dive Deep</button>
+    <button id="btnHighlightSelection">Highlight</button>
+    <button id="btnAnnotateSelection">Annotate</button>
     <button id="btnCopySelection">Copy</button>
     <button id="btnAskAboutSelection">Ask Chat</button>
   </div>
@@ -624,6 +663,23 @@
       <div id="modalBody">
         <div class="modal-loading">Generating visualization...</div>
       </div>
+    </div>
+  </div>
+
+  <!-- Highlight context menu -->
+  <div id="highlightContextMenu" class="highlight-context-menu" role="menu" aria-hidden="true">
+    <button id="ctxAnnotate">Annotate</button>
+    <button id="ctxRemoveHighlight">Remove highlight</button>
+  </div>
+
+  <!-- Annotation modal -->
+  <div id="annotationModal" class="annotation-modal" role="dialog" aria-hidden="true">
+    <div style="font-weight:600; margin-bottom:8px;">Annotation</div>
+    <textarea id="annotationText" placeholder="Add annotation..."></textarea>
+    <div class="actions">
+      <button id="annotationDelete">Delete</button>
+      <button id="annotationCancel">Cancel</button>
+      <button id="annotationSave" class="primary">Save</button>
     </div>
   </div>
 
@@ -903,8 +959,11 @@ Requirements:
     const NOTEBOOK_VERSION = "1.1.0";
     const AUTOSAVE_KEY = "topic_browser_autosave";
     const AUTOSAVE_DEBOUNCE_MS = 2000;
-    let autosaveTimeout = null;
-    let currentSelection = null;    // {text, nodeId, range, snippet}
+  let autosaveTimeout = null;
+  let currentSelection = null;    // {text, nodeId, range, snippet}
+  let PENDING_ANNOTATION_SELECTION = null; // holds selection info while annotation modal is open
+  const HIGHLIGHTS = new Map(); // nodeId -> [{id, text, snippet, xpath, startOffset, endOffset}]
+  const ANNOTATIONS = new Map(); // nodeId -> [{id, text, snippet, xpath, note}]
 
     // ----------------------- Notebook Functions -----------------------
     function serializeNotebook() {
@@ -961,6 +1020,17 @@ Requirements:
         vizElig[nodeId] = eligibility;
       }
 
+      // Serialize highlights
+      const highlights = {};
+      for (const [nodeId, list] of HIGHLIGHTS) {
+        highlights[nodeId] = list;
+      }
+      // Serialize annotations
+      const annotations = {};
+      for (const [nodeId, list] of ANNOTATIONS) {
+        annotations[nodeId] = list;
+      }
+
       const deepWithContext = Array.from(DEEP_WITH_CONTEXT);
 
       const notebook = {
@@ -995,6 +1065,8 @@ Requirements:
         levelContent,
         summaries,
         vizElig,
+        highlights,
+        annotations,
         navMode: NAV_MODE,
         selectedNodeId: SELECTED_NODE_ID,
         readingWidth: READING_WIDTH
@@ -1067,6 +1139,22 @@ Requirements:
       if (notebook.vizElig) {
         for (const [nodeId, eligibility] of Object.entries(notebook.vizElig)) {
           VIZ_ELIG.set(nodeId, eligibility);
+        }
+      }
+
+      // Restore highlights
+      HIGHLIGHTS.clear();
+      if (notebook.highlights) {
+        for (const [nodeId, list] of Object.entries(notebook.highlights)) {
+          HIGHLIGHTS.set(nodeId, list || []);
+        }
+      }
+
+      // Restore annotations
+      ANNOTATIONS.clear();
+      if (notebook.annotations) {
+        for (const [nodeId, list] of Object.entries(notebook.annotations)) {
+          ANNOTATIONS.set(nodeId, list || []);
         }
       }
 
@@ -1177,6 +1265,8 @@ Requirements:
       // Re-typeset MathJax after a short delay to ensure DOM is ready
       setTimeout(() => {
         typesetMath();
+        // Re-apply highlights after math typeset
+        setTimeout(() => { applyHighlightsForNode(SELECTED_NODE_ID); applyAnnotationsForNode(SELECTED_NODE_ID); }, 40);
       }, 200);
     }
 
@@ -1505,8 +1595,8 @@ Requirements:
       const range = selection.getRangeAt(0);
       const text = selection.toString().trim();
       
-      // Validate selection length
-      if (text.length < 8 || text.length > 3000) {
+      // Validate selection length (allow shorter selections down to 3 chars)
+      if (text.length < 3 || text.length > 3000) {
         return null;
       }
 
@@ -1519,8 +1609,12 @@ Requirements:
       let readbox = container;
       let chatMessage = null;
       
-      // Look for readbox first
-      while (readbox && !readbox.classList?.contains('readbox')) {
+      // Look for readbox, level-content, or selected-node-content first
+      while (readbox && !(
+        readbox.classList?.contains('readbox') ||
+        readbox.classList?.contains('level-content') ||
+        readbox.classList?.contains('selected-node-content')
+      )) {
         readbox = readbox.parentNode;
       }
       
@@ -1581,6 +1675,331 @@ Requirements:
         isFromChat: !!chatMessage
       };
     }
+
+    // ---------- Highlighting helpers ----------
+    function uuidv4() {
+      return 'h-' + ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+      );
+    }
+
+    function createHighlightFromSelection() {
+      if (!currentSelection) return null;
+      const { range, text, nodeId, snippet } = currentSelection;
+      // Clone the range so modifications don't affect selection
+      const r = range.cloneRange();
+
+      // Create span wrapper
+      const span = document.createElement('span');
+      const hid = uuidv4();
+      span.className = 'highlighted';
+      span.dataset.highlightId = hid;
+      span.title = 'Highlighted text';
+
+      try {
+        r.surroundContents(span);
+      } catch (e) {
+        // If surroundContents fails (e.g., partial selection across elements), use safe approach
+        const frag = r.extractContents();
+        span.appendChild(frag);
+        r.insertNode(span);
+      }
+
+      // Persist highlight metadata: we store the text, snippet, and a simple XPath to the container
+      const container = span.closest('.readbox') || span.closest('.chat-message') || span;
+      const xpath = getXPathForElement(container);
+
+      const meta = { id: hid, text, snippet, xpath };
+      if (!HIGHLIGHTS.has(nodeId)) HIGHLIGHTS.set(nodeId, []);
+      HIGHLIGHTS.get(nodeId).push(meta);
+      autosave();
+      hideSelectionToolbar();
+      return meta;
+    }
+
+    function applyHighlightsForNode(nodeId) {
+      if (!nodeId) return;
+      const list = HIGHLIGHTS.get(nodeId) || [];
+      // Remove existing highlight spans first
+      removeAllHighlightsInNode(nodeId);
+
+      for (const h of list) {
+        try {
+          const container = getElementByXPath(h.xpath);
+          if (!container) continue;
+          // Find the text occurrence inside container
+          const textNode = findTextNodeContaining(container, h.text);
+          if (!textNode) continue;
+          const idx = textNode.nodeValue.indexOf(h.text);
+          if (idx === -1) continue;
+          const range = document.createRange();
+          range.setStart(textNode, idx);
+          range.setEnd(textNode, idx + h.text.length);
+          const span = document.createElement('span');
+          span.className = 'highlighted';
+          span.dataset.highlightId = h.id;
+          try { range.surroundContents(span); }
+          catch (e) {
+            const frag = range.extractContents();
+            span.appendChild(frag);
+            range.insertNode(span);
+          }
+        } catch (e) {
+          // ignore individual highlight failures
+          console.warn('Failed to apply highlight', h, e);
+        }
+      }
+    }
+
+    function removeAllHighlightsInNode(nodeId) {
+      const container = document.querySelector('.selected-node-content');
+      if (!container) return;
+      const spans = container.querySelectorAll('span.highlighted');
+      spans.forEach(s => {
+        const parent = s.parentNode;
+        while (s.firstChild) parent.insertBefore(s.firstChild, s);
+        parent.removeChild(s);
+        parent.normalize();
+      });
+    }
+
+    function findTextNodeContaining(container, substring) {
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+      let node;
+      while (node = walker.nextNode()) {
+        if (node.nodeValue && node.nodeValue.indexOf(substring) !== -1) return node;
+      }
+      return null;
+    }
+
+    function getXPathForElement(el) {
+      if (!el) return '';
+      const parts = [];
+      while (el && el.nodeType === Node.ELEMENT_NODE) {
+        let idx = 1;
+        let sib = el.previousSibling;
+        while (sib) {
+          if (sib.nodeType === Node.ELEMENT_NODE && sib.nodeName === el.nodeName) idx++;
+          sib = sib.previousSibling;
+        }
+        const tag = el.nodeName.toLowerCase();
+        parts.unshift(`${tag}[${idx}]`);
+        el = el.parentNode;
+      }
+      return '/' + parts.join('/');
+    }
+
+    function getElementByXPath(xpath) {
+      if (!xpath) return null;
+      try {
+        const evaluator = new XPathEvaluator();
+        const result = evaluator.evaluate(xpath, document.documentElement, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        return result.singleNodeValue;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // ----------------------- Annotation helpers -----------------------
+    function uuidAnn() {
+      return 'a-' + ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
+        (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
+      );
+    }
+
+    function createAnnotationFromSelection() {
+      if (!currentSelection) return null;
+      const { range, text, nodeId, snippet } = currentSelection;
+      const r = range.cloneRange();
+      const span = document.createElement('span');
+      const aid = uuidAnn();
+      span.className = 'annotated';
+      span.dataset.annotationId = aid;
+      span.title = 'Annotation (click to edit)';
+
+      try {
+        r.surroundContents(span);
+      } catch (e) {
+        const frag = r.extractContents();
+        span.appendChild(frag);
+        r.insertNode(span);
+      }
+
+      const container = span.closest('.readbox') || span.closest('.chat-message') || span;
+      const xpath = getXPathForElement(container);
+      const meta = { id: aid, text, snippet, xpath, note: '' };
+      if (!ANNOTATIONS.has(nodeId)) ANNOTATIONS.set(nodeId, []);
+      ANNOTATIONS.get(nodeId).push(meta);
+      autosave();
+      hideSelectionToolbar();
+      return meta;
+    }
+
+    function createAnnotationFromSpan(span) {
+      if (!span) return null;
+      // Find nodeId of the containing node
+      const container = span.closest('.readbox') || span.closest('.chat-message') || span;
+      const nodeId = findNodeIdFromContainer(container) || SELECTED_NODE_ID;
+      if (!nodeId) return null;
+      const aid = uuidAnn();
+      span.classList.add('annotated');
+      span.dataset.annotationId = aid;
+      span.title = 'Annotation (click to edit)';
+      const xpath = getXPathForElement(container);
+      const text = span.textContent || '';
+      const snippet = text.length > 50 ? text.substring(0,50) + '...' : text;
+      const meta = { id: aid, text, snippet, xpath, note: '' };
+      if (!ANNOTATIONS.has(nodeId)) ANNOTATIONS.set(nodeId, []);
+      ANNOTATIONS.get(nodeId).push(meta);
+      autosave();
+      return meta;
+    }
+
+    function applyAnnotationsForNode(nodeId) {
+      if (!nodeId) return;
+      const list = ANNOTATIONS.get(nodeId) || [];
+      removeAllAnnotationsInNode(nodeId);
+      for (const a of list) {
+        try {
+          const container = getElementByXPath(a.xpath);
+          if (!container) continue;
+          const textNode = findTextNodeContaining(container, a.text);
+          if (!textNode) continue;
+          const idx = textNode.nodeValue.indexOf(a.text);
+          if (idx === -1) continue;
+          const range = document.createRange();
+          range.setStart(textNode, idx);
+          range.setEnd(textNode, idx + a.text.length);
+          const span = document.createElement('span');
+          span.className = 'annotated';
+          span.dataset.annotationId = a.id;
+          span.title = 'Annotation (click to edit)';
+          try { range.surroundContents(span); }
+          catch (e) { const frag = range.extractContents(); span.appendChild(frag); range.insertNode(span); }
+        } catch (e) {
+          console.warn('Failed to apply annotation', a, e);
+        }
+      }
+    }
+
+    function removeAllAnnotationsInNode(nodeId) {
+      const container = document.querySelector('.selected-node-content');
+      if (!container) return;
+      const spans = container.querySelectorAll('span.annotated');
+      spans.forEach(s => {
+        const parent = s.parentNode;
+        while (s.firstChild) parent.insertBefore(s.firstChild, s);
+        parent.removeChild(s);
+        parent.normalize();
+      });
+    }
+
+    function removeAnnotationById(aid) {
+      const spans = document.querySelectorAll(`span.annotated[data-annotation-id="${aid}"]`);
+      spans.forEach(s => {
+        const parent = s.parentNode;
+        while (s.firstChild) parent.insertBefore(s.firstChild, s);
+        parent.removeChild(s);
+        parent.normalize();
+      });
+
+      for (const [nodeId, list] of ANNOTATIONS) {
+        const idx = list.findIndex(item => item.id === aid);
+        if (idx !== -1) {
+          list.splice(idx, 1);
+          if (list.length === 0) ANNOTATIONS.delete(nodeId);
+          autosave();
+          break;
+        }
+      }
+    }
+
+    // Open annotation modal for existing annotation id or for currentSelection
+    function openAnnotationEditor(aid = null, initialText = '') {
+      const modal = $('annotationModal');
+      const ta = $('annotationText');
+      modal.style.display = 'block';
+      modal.setAttribute('aria-hidden', 'false');
+      modal.dataset.editingAnnotationId = aid || '';
+      if (aid) {
+        // Find annotation meta
+        let meta = null;
+        for (const list of ANNOTATIONS.values()) {
+          const f = list.find(it => it.id === aid);
+          if (f) { meta = f; break; }
+        }
+        ta.value = meta ? (meta.note || '') : '';
+      } else {
+        ta.value = '';
+      }
+      // Preserve the currentSelection for creation if needed
+      PENDING_ANNOTATION_SELECTION = aid ? null : currentSelection ? { ...currentSelection, range: currentSelection.range.cloneRange() } : null;
+      // Focus textarea
+      setTimeout(() => ta.focus(), 30);
+    }
+
+    function closeAnnotationModal() {
+      const modal = $('annotationModal');
+      modal.style.display = 'none';
+      modal.setAttribute('aria-hidden', 'true');
+      delete modal.dataset.editingAnnotationId;
+    }
+
+    function saveAnnotationFromModal() {
+      const modal = $('annotationModal');
+      const ta = $('annotationText');
+      const aid = modal.dataset.editingAnnotationId || null;
+      if (aid) {
+        // Update existing annotation
+        for (const [nodeId, list] of ANNOTATIONS) {
+          const item = list.find(it => it.id === aid);
+          if (item) {
+            item.note = ta.value;
+            autosave();
+            closeAnnotationModal();
+            return;
+          }
+        }
+      } else {
+        // Create new annotation from pending selection (since selection may be lost when modal opened)
+        const savedSelection = PENDING_ANNOTATION_SELECTION || currentSelection;
+        if (savedSelection) {
+          // Temporarily set currentSelection so createAnnotationFromSelection can use it
+          const prev = currentSelection;
+          currentSelection = savedSelection;
+          const meta = createAnnotationFromSelection();
+          if (meta) {
+            meta.note = ta.value;
+            autosave();
+            // Open editor for the newly created annotation? keep closed
+          }
+          currentSelection = prev;
+        }
+        closeAnnotationModal();
+      }
+    }
+
+    function deleteAnnotationFromModal() {
+      const modal = $('annotationModal');
+      const aid = modal.dataset.editingAnnotationId || null;
+      if (aid) removeAnnotationById(aid);
+      // clear pending selection when deleting
+      PENDING_ANNOTATION_SELECTION = null;
+      closeAnnotationModal();
+    }
+
+    // Click handler: open editor when clicking an annotated span
+    document.addEventListener('click', (e) => {
+      const ael = e.target.closest && e.target.closest('span.annotated');
+      if (ael) {
+        e.stopPropagation();
+        const aid = ael.dataset.annotationId || null;
+        if (aid) {
+          openAnnotationEditor(aid);
+        }
+      }
+    });
+
 
     function findNodeIdFromContainer(container) {
       // Look for a data attribute first
@@ -2061,6 +2480,8 @@ Requirements:
       if (chatContainer) {
         initializeChatForNode(nodeId, chatContainer);
       }
+      // Re-apply highlights for this node after rendering
+      try { setTimeout(() => applyHighlightsForNode(nodeId), 40); } catch (e) { /* ignore */ }
     }
 
     function updateLeftNavHighlighting(nodeId) {
@@ -3034,7 +3455,7 @@ Requirements:
         if (levelContent) {
           levelContentDiv.innerHTML = renderMarkdown(levelContent);
           // Process math expressions with MathJax (slight delay to ensure DOM insertion)
-          setTimeout(() => typesetMath(levelContentDiv), 30);
+          setTimeout(() => { typesetMath(levelContentDiv); try { applyHighlightsForNode(node.id); } catch(e){} }, 30);
         } else if (LEVEL_READING.has(`${node.id}@${activeLevel}`)) {
           levelContentDiv.innerHTML = "<p><em>Loading...</em></p>";
         } else {
@@ -3071,6 +3492,7 @@ Requirements:
         wrap.appendChild(rb);
   // Process math expressions with MathJax (short delay)
   setTimeout(() => typesetMath(rb), 30);
+    setTimeout(() => { try { applyHighlightsForNode(node.id); } catch(e){} }, 60);
         }
 
       // Add chat interface (always show for nodes with content or levels enabled)
@@ -3647,8 +4069,77 @@ Requirements:
 
     // Selection toolbar event listeners
     $("btnDiveDeep").addEventListener("click", diveDeep);
+  $("btnHighlightSelection").addEventListener("click", () => { createHighlightFromSelection(); });
+    $("btnAnnotateSelection").addEventListener('click', (ev) => { ev.stopPropagation(); if (currentSelection) openAnnotationEditor(null); });
     $("btnCopySelection").addEventListener("click", copySelection);
     $("btnAskAboutSelection").addEventListener("click", askAboutSelection);
+
+    // Highlight context menu handling
+    let _ctxTargetHighlightId = null;
+    const ctxMenu = $('highlightContextMenu');
+    const ctxRemoveBtn = $('ctxRemoveHighlight');
+    // Show custom context menu only for highlighted spans (we use the selection toolbar for selection actions)
+    document.addEventListener('contextmenu', (e) => {
+      const el = e.target.closest && e.target.closest('span.highlighted');
+      if (el) {
+        e.preventDefault();
+        _ctxTargetHighlightId = el.dataset.highlightId || null;
+        // Position menu near the span
+        const rect = el.getBoundingClientRect();
+        ctxMenu.style.left = `${Math.min(window.innerWidth - 180, Math.max(8, rect.left + 8))}px`;
+        ctxMenu.style.top = `${Math.min(window.innerHeight - 60, Math.max(8, rect.bottom + 6))}px`;
+        // Show remove button only (Annotate is now on the selection toolbar)
+        if (ctxRemoveBtn) ctxRemoveBtn.style.display = 'block';
+        ctxMenu.style.display = 'block';
+        ctxMenu.setAttribute('aria-hidden', 'false');
+      } else {
+        // Hide if not on highlight
+        hideHighlightContextMenu();
+      }
+    });
+
+    function hideHighlightContextMenu() {
+      _ctxTargetHighlightId = null;
+      if (ctxMenu) { ctxMenu.style.display = 'none'; ctxMenu.setAttribute('aria-hidden', 'true'); }
+    }
+
+    ctxRemoveBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (_ctxTargetHighlightId) {
+        removeHighlightById(_ctxTargetHighlightId);
+      }
+      hideHighlightContextMenu();
+    });
+
+    // Note: Annotate action moved to the selection toolbar (btnAnnotateSelection)
+
+    // Hide on any click outside the menu or Escape
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#highlightContextMenu')) hideHighlightContextMenu();
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideHighlightContextMenu(); });
+
+    function removeHighlightById(hid) {
+      // Remove span(s) from DOM
+      const spans = document.querySelectorAll(`span.highlighted[data-highlight-id="${hid}"]`);
+      spans.forEach(s => {
+        const parent = s.parentNode;
+        while (s.firstChild) parent.insertBefore(s.firstChild, s);
+        parent.removeChild(s);
+        parent.normalize();
+      });
+
+      // Remove from HIGHLIGHTS metadata
+      for (const [nodeId, list] of HIGHLIGHTS) {
+        const idx = list.findIndex(item => item.id === hid);
+        if (idx !== -1) {
+          list.splice(idx, 1);
+          if (list.length === 0) HIGHLIGHTS.delete(nodeId);
+          autosave();
+          break;
+        }
+      }
+    }
 
     // Selection handling
     document.addEventListener("selectionchange", () => {
@@ -3700,6 +4191,12 @@ Requirements:
           diveDeep();
         }
       }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'h' || e.key === 'H')) {
+        e.preventDefault();
+        if (currentSelection) {
+          createHighlightFromSelection();
+        }
+      }
       if (e.key === 'Escape') {
         hideSelectionToolbar();
       }
@@ -3738,6 +4235,14 @@ Requirements:
         document.getElementById('inpTemp').addEventListener('input', (e) => {
           document.getElementById('tempVal').textContent = parseFloat(e.target.value).toFixed(2);
         });
+
+        // Annotation modal button wiring
+        const annSave = $('annotationSave');
+        const annCancel = $('annotationCancel');
+        const annDelete = $('annotationDelete');
+        if (annSave) annSave.addEventListener('click', (ev) => { ev.stopPropagation(); saveAnnotationFromModal(); });
+        if (annCancel) annCancel.addEventListener('click', (ev) => { ev.stopPropagation(); closeAnnotationModal(); });
+        if (annDelete) annDelete.addEventListener('click', (ev) => { ev.stopPropagation(); deleteAnnotationFromModal(); });
 
             // Do NOT load autosave on startup. Start a fresh notebook by default.
             // Always enable autosave for future changes.
