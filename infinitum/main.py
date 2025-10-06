@@ -22,7 +22,7 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY", "")  # optional
 # Runtime mode: 'live' (calls OpenAI) or 'dev' (calls a dev server that mimics OpenAI)
 MODE = os.getenv('INFITUM_ENV', 'live')
 DEV_SERVER = os.getenv('INFITUM_DEV_SERVER', '')
-DEV_MODEL = os.getenv('INFITUM_DEV_MODEL', 'stabilityai/stablelm-zephyr-3b')
+DEV_MODEL = os.getenv('INFITUM_DEV_MODEL', 'casperhansen/llama-3.2-3b-instruct-awq')
 DEV_MAX_PROMPT_CHARS = int(os.getenv('INFITUM_DEV_MAX_PROMPT_CHARS', '1200'))
 DEV_MAX_PROMPT_TOKENS = int(os.getenv('INFITUM_DEV_MAX_PROMPT_TOKENS', '0'))
 
@@ -62,6 +62,56 @@ def _ensure_ids(nodes, seen=None, prefix=""):
         out.append(n)
     return out
 
+
+# Helpers for token counting and model context for dev servers
+def _get_dev_model_context(model_name: str) -> int:
+    """Return estimated model context window for a given dev model name.
+    Can be overridden with ENV INFITUM_DEV_MODEL_CONTEXT (int).
+    """
+    try:
+        env_default = int(os.getenv('INFITUM_DEV_MODEL_CONTEXT', '4096'))
+    except Exception:
+        env_default = 4096
+
+    # Known model defaults (conservative estimates). Add entries as needed.
+    mapping = {
+        # Conservative default for the casperhansen Llama 3.x instruct family
+        'casperhansen/llama-3.2-3b-instruct-awq': 4096,
+        'stabilityai/stablelm-zephyr-3b': 4096,
+    }
+    return mapping.get(model_name, env_default)
+
+
+def _count_tokens(text: str) -> int:
+    """Count approximate tokens in text. Prefer tiktoken when available.
+    Falls back to a char-based heuristic (1 token ~= 4 chars).
+    """
+    if not text:
+        return 0
+    if _HAS_TIKTOKEN:
+        try:
+            enc = tiktoken.get_encoding('cl100k_base')
+            return len(enc.encode(text))
+        except Exception:
+            pass
+    # Fallback heuristic: 1 token per ~4 characters
+    return max(1, len(text) // 4)
+
+
+def _tokens_in_messages(messages) -> int:
+    """Estimate total tokens used by a list of chat messages.
+    Add a small per-message overhead for role/format tokens.
+    """
+    if not messages:
+        return 0
+    total = 0
+    for m in messages:
+        content = (m or {}).get('content', '') or ''
+        total += _count_tokens(content)
+        # overhead per message for role/name/formatting
+        total += 4
+    return total
+
 def _chat_json(model, temperature, system, user):
     """Call OpenAI chat.completions expecting JSON content."""
     # Choose target URL depending on MODE
@@ -72,22 +122,20 @@ def _chat_json(model, temperature, system, user):
     if MODE == 'dev':
         if not DEV_SERVER:
             abort(500, "DEV server URL not configured (pass --server when running in dev mode)")
-        # Many dev model servers expect the completions-style endpoint with a single prompt string.
-        # Map the system + user to a single prompt for /v1/completions
-        url = DEV_SERVER.rstrip('/') + '/v1/completions'
-        prompt = (system or "") + "\n\n" + (user or "")
-        # Truncate overly long prompt for small-context dev models.
-        # Prefer token-based truncation if configured; otherwise fallback to char-based truncation.
+        # Talk to the dev server using the Chat Completions endpoint and send chat-style messages.
+        url = DEV_SERVER.rstrip('/') + '/v1/chat/completions'
+
+        # Helper: char-based middle truncation
         def _truncate_middle_chars(s, max_chars):
             if not s or len(s) <= max_chars:
                 return s
             half = max_chars // 2
             return s[:half] + "\n\n...[truncated context]...\n\n" + s[-half:]
 
+        # Helper: token-aware truncation using tiktoken when available
         def _truncate_by_tokens(s, max_tokens):
             if not s or max_tokens <= 0:
                 return s
-            # Use tiktoken if available for accurate token counts and decoding
             if _HAS_TIKTOKEN:
                 try:
                     enc = tiktoken.get_encoding('cl100k_base')
@@ -109,23 +157,40 @@ def _chat_json(model, temperature, system, user):
             tail = max_tokens - head
             return ' '.join(words[:head]) + "\n\n...[truncated context]...\n\n" + ' '.join(words[-tail:])
 
-        if DEV_MAX_PROMPT_TOKENS and isinstance(DEV_MAX_PROMPT_TOKENS, int) and DEV_MAX_PROMPT_TOKENS > 0:
-            # Truncate by tokens
-            prompt_before = len(prompt)
-            prompt = _truncate_by_tokens(prompt, DEV_MAX_PROMPT_TOKENS)
-            if len(prompt) < prompt_before:
-                print(f"Truncated dev prompt to token limit {DEV_MAX_PROMPT_TOKENS}")
-        elif DEV_MAX_PROMPT_CHARS and isinstance(DEV_MAX_PROMPT_CHARS, int) and DEV_MAX_PROMPT_CHARS > 0:
-            if len(prompt) > DEV_MAX_PROMPT_CHARS:
-                print(f"Truncating dev prompt from {len(prompt)} to {DEV_MAX_PROMPT_CHARS} chars")
-                prompt = _truncate_middle_chars(prompt, DEV_MAX_PROMPT_CHARS)
+        # Per-message truncation: prefer token-based when configured, else char-based
+        def _truncate_message(s: str) -> str:
+            if not s:
+                return s or ""
+            if DEV_MAX_PROMPT_TOKENS and isinstance(DEV_MAX_PROMPT_TOKENS, int) and DEV_MAX_PROMPT_TOKENS > 0:
+                truncated = _truncate_by_tokens(s, DEV_MAX_PROMPT_TOKENS)
+                if truncated != s:
+                    print(f"Truncated a dev message to token limit {DEV_MAX_PROMPT_TOKENS}")
+                return truncated
+            if DEV_MAX_PROMPT_CHARS and isinstance(DEV_MAX_PROMPT_CHARS, int) and DEV_MAX_PROMPT_CHARS > 0:
+                if len(s) > DEV_MAX_PROMPT_CHARS:
+                    print(f"Truncating a dev message from {len(s)} to {DEV_MAX_PROMPT_CHARS} chars")
+                    return _truncate_middle_chars(s, DEV_MAX_PROMPT_CHARS)
+            return s
+
+        # Build chat-style messages and truncate each message individually for small dev models
+        chat_messages = []
+        if system:
+            chat_messages.append({"role": "system", "content": _truncate_message(system)})
+        if user:
+            chat_messages.append({"role": "user", "content": _truncate_message(user)})
+
         model_to_use = DEV_MODEL if DEV_MODEL else model
+        # Determine safe max_tokens based on model context and input tokens
+        requested_max = 800
+        model_context = _get_dev_model_context(model_to_use)
+        input_tokens = _tokens_in_messages(chat_messages)
+        safe_max = max(0, min(requested_max, model_context - input_tokens - 10))
         payload = {
             "model": model_to_use,
-            "prompt": prompt,
+            "messages": chat_messages,
             "temperature": temperature,
-            # allow the server to choose token limits; include a reasonable max by default
-            "max_tokens": 800
+            # dynamically compute max_tokens so it fits within model context (leave a 10-token buffer)
+            "max_tokens": 650
         }
         # Debug logging to help diagnose 404/Not Found from dev servers
         try:
@@ -155,53 +220,53 @@ def _chat_json(model, temperature, system, user):
                 pass
             abort(r.status_code, r.text)
 
-        data = r.json()
-        print("DEV response data:", data)
-        # Accept multiple shapes: choices[0].text or choices[0].message.content
-        choice0 = data.get('choices', [{}])[0] or {}
-        text = choice0.get('text') or (choice0.get('message') or {}).get('content') or ''
+    data = r.json()
+    print("DEV response data:", data)
+    # Accept multiple shapes: choices[0].message.content or choices[0].text
+    choice0 = data.get('choices', [{}])[0] or {}
+    text = (choice0.get('message') or {}).get('content') or choice0.get('text') or ''
 
-        # Try to parse JSON from the returned text. Handle common dev-server formats:
-        # - Raw JSON
-        # - JSON inside a ```json ... ``` fenced code block
-        # - JSON embedded somewhere in the text (first {...} match)
-        import re
-        txt = (text or "").strip()
+    # Try to parse JSON from the returned text. Handle common dev-server formats:
+    # - Raw JSON
+    # - JSON inside a ```json ... ``` fenced code block
+    # - JSON embedded somewhere in the text (first {...} match)
+    import re
+    txt = (text or "").strip()
 
-        # Direct parse
+    # Direct parse
+    try:
+        parsed = json.loads(txt)
+        return parsed, data
+    except Exception:
+        pass
+
+    # Fenced ```json ... ``` blocks
+    m = re.search(r"```json\s*([\s\S]*?)```", txt, re.IGNORECASE)
+    if m:
+        candidate = m.group(1).strip()
         try:
-            parsed = json.loads(txt)
+            parsed = json.loads(candidate)
             return parsed, data
         except Exception:
             pass
 
-        # Fenced ```json ... ``` blocks
-        m = re.search(r"```json\s*([\s\S]*?)```", txt, re.IGNORECASE)
-        if m:
-            candidate = m.group(1).strip()
-            try:
-                parsed = json.loads(candidate)
-                return parsed, data
-            except Exception:
-                pass
-
-        # First JSON object substring (non-greedy)
-        m2 = re.search(r"\{[\s\S]*?\}", txt)
-        if m2:
-            candidate = m2.group(0)
-            try:
-                parsed = json.loads(candidate)
-                return parsed, data
-            except Exception:
-                pass
-
-        # As a last attempt, try parsing choice.message.content directly
+    # First JSON object substring (non-greedy)
+    m2 = re.search(r"\{[\s\S]*?\}", txt)
+    if m2:
+        candidate = m2.group(0)
         try:
-            alt = (choice0.get('message') or {}).get('content', '')
-            parsed = json.loads(alt or "{}")
+            parsed = json.loads(candidate)
             return parsed, data
         except Exception:
-            abort(500, f"Dev server returned invalid JSON in completions text; raw text starts: {txt[:400]}")
+            pass
+
+    # As a last attempt, try parsing choice.message.content directly
+    try:
+        alt = (choice0.get('message') or {}).get('content', '')
+        parsed = json.loads(alt or "{}")
+        return parsed, data
+    except Exception:
+        abort(500, f"Dev server returned invalid JSON in completions text; raw text starts: {txt[:400]}")
     else:
         # Live OpenAI Chat completions path (chat messages + JSON response format)
         url = 'https://api.openai.com/v1/chat/completions'
@@ -231,33 +296,72 @@ def _chat_text(model, temperature, system, messages):
     if MODE == 'dev':
         if not DEV_SERVER:
             abort(500, "DEV server URL not configured (pass --server when running in dev mode)")
-        # Map chat-style messages into a single prompt for completions endpoint.
-        url = DEV_SERVER.rstrip('/') + '/v1/completions'
-        # Build a readable prompt: include system then recent messages
-        parts = [system or ""]
-        for m in messages:
-            role = m.get('role', 'user')
-            content = m.get('content', '')
-            parts.append(f"{role}: {content}")
-        prompt = "\n\n".join(parts)
-        model_to_use = DEV_MODEL if DEV_MODEL else model
-        payload = {
-            "model": model_to_use,
-            "prompt": prompt,
-            "temperature": temperature,
-            "max_tokens": 800
-        }
-        # Truncate prompt for small dev contexts
-        def _truncate_middle(s, max_chars):
+        # Use chat completions endpoint and send messages rather than a single prompt
+        url = DEV_SERVER.rstrip('/') + '/v1/chat/completions'
+
+        # Helpers shared with _chat_json behavior: char/token truncation and per-message truncation
+        def _truncate_middle_chars(s, max_chars):
             if not s or len(s) <= max_chars:
                 return s
             half = max_chars // 2
             return s[:half] + "\n\n...[truncated context]...\n\n" + s[-half:]
 
-        if DEV_MAX_PROMPT_CHARS and isinstance(DEV_MAX_PROMPT_CHARS, int) and DEV_MAX_PROMPT_CHARS > 0:
-            if len(payload['prompt']) > DEV_MAX_PROMPT_CHARS:
-                print(f"Truncating dev prompt from {len(payload['prompt'])} to {DEV_MAX_PROMPT_CHARS} chars")
-                payload['prompt'] = _truncate_middle(payload['prompt'], DEV_MAX_PROMPT_CHARS)
+        def _truncate_by_tokens(s, max_tokens):
+            if not s or max_tokens <= 0:
+                return s
+            if _HAS_TIKTOKEN:
+                try:
+                    enc = tiktoken.get_encoding('cl100k_base')
+                    token_ids = enc.encode(s)
+                    if len(token_ids) <= max_tokens:
+                        return s
+                    head = max_tokens // 2
+                    tail = max_tokens - head
+                    head_dec = enc.decode(token_ids[:head])
+                    tail_dec = enc.decode(token_ids[-tail:])
+                    return head_dec + "\n\n...[truncated context]...\n\n" + tail_dec
+                except Exception:
+                    pass
+            words = s.split()
+            if len(words) <= max_tokens:
+                return s
+            head = max_tokens // 2
+            tail = max_tokens - head
+            return ' '.join(words[:head]) + "\n\n...[truncated context]...\n\n" + ' '.join(words[-tail:])
+
+        def _truncate_message(s: str) -> str:
+            if not s:
+                return s or ""
+            if DEV_MAX_PROMPT_TOKENS and isinstance(DEV_MAX_PROMPT_TOKENS, int) and DEV_MAX_PROMPT_TOKENS > 0:
+                truncated = _truncate_by_tokens(s, DEV_MAX_PROMPT_TOKENS)
+                if truncated != s:
+                    print(f"Truncated a dev message to token limit {DEV_MAX_PROMPT_TOKENS}")
+                return truncated
+            if DEV_MAX_PROMPT_CHARS and isinstance(DEV_MAX_PROMPT_CHARS, int) and DEV_MAX_PROMPT_CHARS > 0:
+                if len(s) > DEV_MAX_PROMPT_CHARS:
+                    print(f"Truncating a dev message from {len(s)} to {DEV_MAX_PROMPT_CHARS} chars")
+                    return _truncate_middle_chars(s, DEV_MAX_PROMPT_CHARS)
+            return s
+
+        # Build chat messages and truncate each individually
+        chat_messages = []
+        if system:
+            chat_messages.append({"role": "system", "content": _truncate_message(system)})
+        for m in messages:
+            chat_messages.append({"role": m.get("role", "user"), "content": _truncate_message(m.get("content", ""))})
+
+        model_to_use = DEV_MODEL if DEV_MODEL else model
+        # Determine safe max_tokens based on model context and input tokens
+        requested_max = 800
+        model_context = _get_dev_model_context(model_to_use)
+        input_tokens = _tokens_in_messages(chat_messages)
+        safe_max = max(0, min(requested_max, model_context - input_tokens - 10))
+        payload = {
+            "model": model_to_use,
+            "messages": chat_messages,
+            "temperature": temperature,
+            "max_tokens": 650
+        }
         try:
             print(f"DEV -> POST {url}")
             print("DEV -> payload:", (payload if len(str(payload)) < 2000 else str(payload)[:2000] + '...'))
@@ -285,7 +389,7 @@ def _chat_text(model, temperature, system, messages):
 
         data = r.json()
         choice0 = data.get('choices', [{}])[0] or {}
-        text = choice0.get('text') or (choice0.get('message') or {}).get('content') or ''
+        text = (choice0.get('message') or {}).get('content') or choice0.get('text') or ''
         return text, data
     else:
         url = 'https://api.openai.com/v1/chat/completions'
