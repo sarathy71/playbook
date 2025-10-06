@@ -1003,7 +1003,7 @@ Requirements:
     const ACTIVE_LEVEL = new Map();   // nodeId → active level (1-10)
     const LEVEL_CONTENT = new Map();  // nodeId → Map<level, content>
     const LEVEL_READING = new Set();  // nodeId@level → in-flight read
-    const SUMMARIES = new Map();       // nodeId → summary text
+  const SUMMARIES = new Map();       // nodeId → summary text
     const VISUALIZING = new Set();    // nodeId → in-flight visualization
     const VIZ_ELIG = new Map();        // nodeId → { ok: boolean, score: number, rationale: string }
     const VIZ_ELIG_CHECKING = new Set(); // nodeId → in-flight eligibility check
@@ -1074,6 +1074,7 @@ Requirements:
         summaries[nodeId] = summary;
       }
 
+
       const vizElig = {};
       for (const [nodeId, eligibility] of VIZ_ELIG) {
         vizElig[nodeId] = eligibility;
@@ -1128,7 +1129,7 @@ Requirements:
         levelsEnabled,
         activeLevel,
         levelContent,
-        summaries,
+  summaries,
         vizElig,
         highlights,
         annotations,
@@ -1206,6 +1207,8 @@ Requirements:
           SUMMARIES.set(nodeId, summary);
         }
       }
+
+      
       
       // Restore visualization eligibility
       VIZ_ELIG.clear();
@@ -2533,13 +2536,45 @@ Requirements:
       
       nodeDiv.addEventListener('click', () => {
         selectNodeInLeftNav(node.id);
-        if (!hasChildren) {
-          // Show loading indicator immediately
+
+        // If levels UI is enabled for this node, ensure the active level is loaded
+        if (LEVELS_ENABLED.has(node.id)) {
+          const activeLevel = ACTIVE_LEVEL.get(node.id) || 5;
+          if (!LEVEL_CONTENT.get(node.id)?.has(activeLevel) && !LEVEL_READING.has(`${node.id}@${activeLevel}`)) {
+            const mainContentPane = $("mainContentPane");
+            if (mainContentPane) {
+              mainContentPane.innerHTML = '<div class="loading-indicator"><p><em>Loading...</em></p></div>';
+            }
+            // fetch level content
+            fetchLevelContent(node.id, activeLevel);
+          }
+          return;
+        }
+
+        // If this node already has children (expanded or cached) but no content,
+        // generate a concise summary from the available child metadata so the user
+        // immediately sees a 2-3 paragraph overview with examples/key topics.
+        const knownChildren = (node.children && node.children.length) || (EXP_CACHE.has(node.id) && EXP_CACHE.get(node.id)?.length);
+        if (knownChildren && !CONTENT.has(node.id) && !SUMMARIES.has(node.id)) {
+          // Instead of calling the summary endpoint, call the full read endpoint
+          // so the server returns full content (and the server-side
+          // implementation can generate a summary as part of the read flow).
+          const mainContentPane = $("mainContentPane");
+          if (mainContentPane) mainContentPane.innerHTML = '<div class="loading-indicator"><p><em>Loading...</em></p></div>';
+          // Trigger a full read which will populate CONTENT and SUMMARIES on success
+          readSection(node, getNodePath(node.id)).catch((e) => {
+            console.warn('readSection failed for node:', node.id, e);
+            showError('Failed to load content: ' + (e.message || String(e)));
+          });
+          return;
+        }
+
+        // For regular content: if we don't already have content cached and not currently reading, fetch it.
+        if (!CONTENT.has(node.id) && !READING.has(node.id)) {
           const mainContentPane = $("mainContentPane");
           if (mainContentPane) {
             mainContentPane.innerHTML = '<div class="loading-indicator"><p><em>Loading...</em></p></div>';
           }
-          // Auto-read content for leaf nodes
           readSection(node, getNodePath(node.id));
         }
       });
@@ -2678,6 +2713,30 @@ Requirements:
           </div>
         `;
         contentDiv.appendChild(chatContainer);
+      } else if (SUMMARIES.has(nodeId)) {
+        // If a summary exists but full content isn't cached yet, show the summary
+        const readbox = document.createElement('div');
+        readbox.className = 'readbox';
+        const summaryText = SUMMARIES.get(nodeId) || '';
+        readbox.innerHTML = `<div class="summary-box"><strong>Summary:</strong><br>${renderMarkdown(summaryText)}</div>`;
+        contentDiv.appendChild(readbox);
+        // Delay typesetting slightly so MathJax can find newly inserted math
+        setTimeout(() => typesetMath(readbox).then(() => emitContentRendered(nodeId)).catch(() => emitContentRendered(nodeId)), 30);
+
+        // Add chat interface below the summary so users can ask questions immediately
+        const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 5)})` : "";
+        const chatContainer = document.createElement('div');
+        chatContainer.className = 'chat-container';
+        chatContainer.innerHTML = `
+          <div class="chat-header">Ask questions about ${node.title}${levelInfo}</div>
+          <div class="chat-messages"></div>
+          <div class="chat-input-container">
+            <input type="text" class="chat-input" placeholder="Ask a question..." />
+            <button class="chat-send-btn">Send</button>
+          </div>
+        `;
+        contentDiv.appendChild(chatContainer);
+        initializeChatForNode(nodeId, chatContainer);
       } else {
         // Show loading indicator when no content is available yet
         const loadingDiv = document.createElement('div');
@@ -3523,6 +3582,8 @@ Requirements:
         return "Summary generation failed. Please try again.";
       }
     }
+
+    
 
     function undoLastChange() {
       if (UNDO_STACK.length === 0) return;
