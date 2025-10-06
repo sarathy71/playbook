@@ -461,13 +461,9 @@ def api_read():
     
     level_instruction = level_descriptions.get(level, level_descriptions[5])
 
-    # If the client is requesting an "Overview" node (common for deep-dive first items),
-    # ask the model for a broader, high-level explanation in 2-4 paragraphs. This produces
-    # a more encyclopedic, readable format (fewer bullet lists / examples) which the
-    # frontend owner requested.
-    if (node.get('title') or '').strip().lower() == 'overview':
-        user_prompt = f"""
-Write a broad, high-level overview for the selected outline item consisting of 2–4 well-structured paragraphs. Focus on explaining the core concepts, their relationships, and why the topic matters within the larger subject. Avoid long lists, step-by-step instructions, and avoid many short bullets or multiple examples; instead provide a clear conceptual framing that helps the reader form a mental model of the topic. Use Markdown paragraphs (no top-level heading required) and LaTeX for any math.
+    # Replace the per-case prompts with a single exhaustive-study prompt for read requests.
+    user_prompt = f"""
+Write an exhaustive, in-depth study of the selected outline item. Treat it as a comprehensive mini-chapter that explores the topic from all relevant angles — theory, context, methodology, examples, and implications. The goal is to provide a complete understanding suitable for independent study or teaching material.
 
 Global Topic: {topic}
 Audience: {audience}
@@ -480,32 +476,14 @@ Current Item: {node.get('title','')}
 Current Item ID: {node.get('id','')}
 
 Guidelines:
-- Produce 2–4 medium-length paragraphs that together form a cohesive overview (not a list of facts).
-- Keep language clear and appropriate to the requested proficiency level: {level_instruction}
-- Prefer conceptual explanation and connections over many short examples; include at most one brief illustrative example only if it significantly clarifies the concept.
-- Use $...$ for inline math and $$...$$ for display math when needed.
-- Do not return JSON; return only the Markdown content.
-""".strip()
-    else:
-        user_prompt = f"""
-Write a concise overview (2–3 short paragraphs) for the selected outline item. Include 1–3 clear examples or illustrative scenarios (use short bullet points if helpful). Use Markdown and LaTeX for any math.
-
-Global Topic: {topic}
-Audience: {audience}
-Proficiency Level: {level}/10 - {level_instruction}
-Depth preference (context): {depth}
-Approx sections per level (context): {sections}
-
-Breadcrumb (root->current): {' > '.join([p.get('title','') for p in path])}
-Current Item: {node.get('title','')}
-Current Item ID: {node.get('id','')}
-
-Guidelines:
-- Keep the overview focused and readable: 2–3 brief paragraphs (not a long essay).
-- Provide 1–3 concrete examples or short scenarios that illustrate the core idea (bulleted list is fine).
-- Use simple, clear language appropriate to the requested proficiency level; match the level exactly: {level_instruction}
-- Use $...$ for inline math and $$...$$ for display math when needed.
-- Do not return JSON; return only the Markdown content.
+- Length: 900–1500 words (aim for depth and completeness, not brevity).
+- Organize clearly with Markdown subheadings (e.g., Introduction, Conceptual Foundations, Mechanisms, Mathematical Formulation, Applications, Examples, Limitations, Future Directions).
+- Include formal definitions, derivations, or step-by-step reasoning where relevant.
+- Provide multiple illustrative examples (mathematical, conceptual, or real-world) with brief explanations.
+- Integrate diagrams or visual analogies when appropriate (describe them textually if visuals cannot be rendered).
+- Use $...$ for inline math and $$...$$ for display math.
+- Write in a teaching tone: structured, logical, and progressively deep.
+- Do **not** return JSON; return only Markdown content.
 """.strip()
 
     content, raw = _chat_text(model, temperature,
