@@ -218,6 +218,22 @@
       flex-shrink: 0;
       transition: width 0.3s ease;
     }
+
+    /* Collapsed sidebar: hide completely to remove leftover whitespace */
+    .left-nav-sidebar.collapsed {
+      width: 0 !important; /* collapse to zero width */
+      min-width: 0 !important;
+      padding: 0 !important;
+      overflow: hidden !important;
+      border-right: none !important;
+    }
+    .left-nav-sidebar.collapsed .left-nav-title-bar { display: none; }
+    .left-nav-sidebar.collapsed .left-nav-title-text { display: none; }
+    .left-nav-sidebar.collapsed .left-nav-tree { display: none; }
+    .left-nav-sidebar.collapsed .left-nav-node { display: none; }
+
+    /* When on small screens, treat toggle as an overlay open/close */
+    .left-nav-sidebar.open { left: 0; }
     
     
     .left-nav-title-bar {
@@ -545,7 +561,10 @@
 <body>
   <div class="wrap">
     <div class="toolbar" style="justify-content:space-between; margin-bottom: 8px; position:relative; padding: 0 4px;">
-      <div class="title" style="position:absolute; left:4px; z-index: 1;">Playbook</div>
+      <div style="position:absolute; left:4px; z-index: 1; display:flex; align-items:center; gap:6px;">
+        <button id="navToggleBtn" class="btn-ghost" title="Toggle navigation" style="padding:6px 8px; border-radius:8px;">☰</button>
+        <div class="title" style="z-index: 1;">Playbook</div>
+      </div>
       <div class="flex" style="justify-content:center; flex: 1; margin: 0 120px;">
         <input id="inpTopic" type="text" placeholder="e.g., Neural Networks, Ramayana, Corporate Finance" style="margin-right: 8px; padding: 8px 12px; border: 1px solid var(--ring); border-radius: 6px; font-size: 14px; min-width: 300px;" />
         <button id="btnGen" class="btn">Learn</button>
@@ -4960,6 +4979,65 @@ Requirements:
         window.addEventListener('keydown', __kbHandler, { capture: true, passive: false });
 
         console.log("Topic Browser initialized successfully");
+        // Initialize left-nav collapsed state from localStorage
+        const leftNavSidebar = $("leftNavSidebar");
+        const navToggleBtn = $("navToggleBtn");
+        function setNavCollapsed(collapsed, persist = true) {
+          if (!leftNavSidebar) return;
+          if (collapsed) {
+            leftNavSidebar.classList.add('collapsed');
+          } else {
+            leftNavSidebar.classList.remove('collapsed');
+          }
+
+          // Desktop: remove the element from layout so main content expands fully
+          if (window.innerWidth > 768) {
+            leftNavSidebar.style.display = collapsed ? 'none' : 'block';
+          } else {
+            // Mobile: keep it available for overlay open/close behavior
+            leftNavSidebar.style.display = 'block';
+            if (!collapsed) leftNavSidebar.classList.add('open');
+            else leftNavSidebar.classList.remove('open');
+          }
+
+          if (persist) localStorage.setItem('leftNavCollapsed', collapsed ? '1' : '0');
+        }
+
+        function toggleNavCollapsed() {
+          const isCollapsed = leftNavSidebar && leftNavSidebar.classList.contains('collapsed');
+          setNavCollapsed(!isCollapsed);
+        }
+
+        if (navToggleBtn) {
+          navToggleBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation(); ev.preventDefault();
+            // On small screens, toggle overlay open/close
+            if (window.innerWidth <= 768) {
+              leftNavSidebar.classList.toggle('open');
+            } else {
+              toggleNavCollapsed();
+            }
+          });
+        }
+
+        // Restore persisted state
+        try {
+          const saved = localStorage.getItem('leftNavCollapsed');
+          if (saved === '1') setNavCollapsed(true, false);
+        } catch (e) { /* ignore */ }
+
+        // Keep behavior consistent on resize (toggle display based on desktop vs mobile)
+        window.addEventListener('resize', () => {
+          if (!leftNavSidebar) return;
+          if (window.innerWidth > 768) {
+            // On desktop, if collapsed hide element
+            if (leftNavSidebar.classList.contains('collapsed')) leftNavSidebar.style.display = 'none';
+            else leftNavSidebar.style.display = 'block';
+          } else {
+            // On mobile, always show and rely on 'open' class
+            leftNavSidebar.style.display = 'block';
+          }
+        });
       } catch (error) {
         console.error("Error initializing Topic Browser:", error);
       }
