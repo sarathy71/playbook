@@ -461,8 +461,13 @@ def api_read():
     
     level_instruction = level_descriptions.get(level, level_descriptions[5])
 
-    user_prompt = f"""
-Write a clear, well-structured explanation (250–450 words) for the selected outline item. Use Markdown and LaTeX for math.
+    # If the client is requesting an "Overview" node (common for deep-dive first items),
+    # ask the model for a broader, high-level explanation in 2-4 paragraphs. This produces
+    # a more encyclopedic, readable format (fewer bullet lists / examples) which the
+    # frontend owner requested.
+    if (node.get('title') or '').strip().lower() == 'overview':
+        user_prompt = f"""
+Write a broad, high-level overview for the selected outline item consisting of 2–4 well-structured paragraphs. Focus on explaining the core concepts, their relationships, and why the topic matters within the larger subject. Avoid long lists, step-by-step instructions, and avoid many short bullets or multiple examples; instead provide a clear conceptual framing that helps the reader form a mental model of the topic. Use Markdown paragraphs (no top-level heading required) and LaTeX for any math.
 
 Global Topic: {topic}
 Audience: {audience}
@@ -474,17 +479,63 @@ Breadcrumb (root->current): {' > '.join([p.get('title','') for p in path])}
 Current Item: {node.get('title','')}
 Current Item ID: {node.get('id','')}
 
-Style:
-- Use paragraphs and short bullet lists where helpful.
-- Inline math: $...$ ; display math: $$...$$
-- Match the requested proficiency level exactly: {level_instruction}
-- No JSON.
+Guidelines:
+- Produce 2–4 medium-length paragraphs that together form a cohesive overview (not a list of facts).
+- Keep language clear and appropriate to the requested proficiency level: {level_instruction}
+- Prefer conceptual explanation and connections over many short examples; include at most one brief illustrative example only if it significantly clarifies the concept.
+- Use $...$ for inline math and $$...$$ for display math when needed.
+- Do not return JSON; return only the Markdown content.
+""".strip()
+    else:
+        user_prompt = f"""
+Write a concise overview (2–3 short paragraphs) for the selected outline item. Include 1–3 clear examples or illustrative scenarios (use short bullet points if helpful). Use Markdown and LaTeX for any math.
+
+Global Topic: {topic}
+Audience: {audience}
+Proficiency Level: {level}/10 - {level_instruction}
+Depth preference (context): {depth}
+Approx sections per level (context): {sections}
+
+Breadcrumb (root->current): {' > '.join([p.get('title','') for p in path])}
+Current Item: {node.get('title','')}
+Current Item ID: {node.get('id','')}
+
+Guidelines:
+- Keep the overview focused and readable: 2–3 brief paragraphs (not a long essay).
+- Provide 1–3 concrete examples or short scenarios that illustrate the core idea (bulleted list is fine).
+- Use simple, clear language appropriate to the requested proficiency level; match the level exactly: {level_instruction}
+- Use $...$ for inline math and $$...$$ for display math when needed.
+- Do not return JSON; return only the Markdown content.
 """.strip()
 
     content, raw = _chat_text(model, temperature,
                               "You explain concepts clearly with examples. Use Markdown and LaTeX for math.",
                               [{"role": "user", "content": user_prompt}])
-    return jsonify({"content": content, "model": raw.get("model"), "tokens": raw.get("usage")})
+    # If this is an Overview node, also ask the model for a concise 2-4 sentence
+    # summary server-side so the UI doesn't have to parse or synthesize one.
+    summary_text = None
+    try:
+        if (node.get('title') or '').strip().lower() == 'overview':
+            sum_prompt = f"""
+Summarize the following overview in 2–4 clear sentences suitable as a short summary for a UI display. Keep it focused and non-redundant; do not add new technical details.
+
+Overview content:
+{content}
+
+Return only the summary as plain text.
+""".strip()
+            sum_resp, raw_sum = _chat_text(model, 0.2,
+                                           "You are an expert summarizer. Produce 2-4 clear sentences that capture the essence of the provided overview.",
+                                           [{"role": "user", "content": sum_prompt}])
+            summary_text = (sum_resp or "").strip()
+    except Exception:
+        # Best-effort only; don't fail the read call for summary generation errors
+        summary_text = None
+
+    resp = {"content": content, "model": raw.get("model"), "tokens": raw.get("usage")}
+    if summary_text:
+        resp["summary"] = summary_text
+    return jsonify(resp)
 
 @app.post("/api/chat")
 def api_chat():

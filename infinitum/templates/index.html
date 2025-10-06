@@ -3233,38 +3233,48 @@ Requirements:
 
           const overviewId = wrapper.id; // use wrapper id for overview content
 
-          // Generate a concise summary (tries to produce 2-4 paragraphs when possible)
+          // Fetch a full, level-aware explanation for the overview via /api/read
+          // (prefer server's read endpoint instead of calling the summary endpoint)
           let summary = '';
+          let readOverviewContent = '';
           try {
-            // Use a combined input to the summary generator for better results
-            const summarySeed = `Title: ${wrapper.title}\n\nDescription: ${wrapper.description || ''}\n\nDetails:\n\n${detailed}`;
-            summary = await generateSummary(overviewId, summarySeed) || '';
+            const depth = parseInt($("inpDepth").value || "3", 10);
+            const sections = parseInt($("inpSections").value || "5", 10);
+            const respRead = await fetch("/api/read", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                topic,
+                audience,
+                model,
+                temperature,
+                node: { id: overviewId, title: wrapper.title },
+                path,
+                depth,
+                sections,
+                level: 5
+              })
+            });
+            if (!respRead.ok) throw new Error(await respRead.text());
+            const rdr = await respRead.json();
+            readOverviewContent = rdr.content || '';
           } catch (e) {
-            console.warn('Summary generation for deep-dive overview failed:', e);
-            summary = wrapper.description || '';
+            console.warn('Read generation for deep-dive overview failed:', e);
+            readOverviewContent = wrapper.description || '';
           }
 
-          // Build Key topics list
-          const keyTopicsList = (wrapper.children || []).map(c => `- ${c.title || c.id}`).join('\n') || '';
-
-          // Build crisp examples from child readContent or description (first sentence)
-          function firstSentence(s) {
-            if (!s) return '';
-            const m = String(s).trim().match(/([\s\S]*?[.!?])(?=\s|$)/);
-            return m ? m[1].trim() : (String(s).trim().split('\n')[0] || '').trim();
-          }
-          let examples = '';
-          for (const c of (wrapper.children || [])) {
-            const src = c.readContent || c.description || '';
-            const ex = firstSentence(src);
-            examples += `- ${c.title}: ${ex || '(example not provided)'}\n`;
-          }
-
-          // Compose final overview: title, summary, key topics, crisp examples, then detailed sections
+          // Prefer server-provided Overview content. If the server returned a
+          // concise `summary` field, use it for UI summary boxes. Do not
+          // synthesize key topics or examples on the client; those are
+          // redundant and better controlled via server prompts.
           let finalComposed = `# ${wrapper.title}\n\n`;
-          if (summary) finalComposed += `${summary}\n\n`;
-          if (keyTopicsList) finalComposed += `**Key topics:**\n\n${keyTopicsList}\n\n`;
-          if (examples) finalComposed += `**Crisp examples:**\n\n${examples}\n`;
+          if (readOverviewContent) {
+            finalComposed += `${readOverviewContent}\n\n`;
+          } else if (summary) {
+            finalComposed += `${summary}\n\n`;
+          } else if (wrapper.description) {
+            finalComposed += `${wrapper.description}\n\n`;
+          }
           finalComposed += detailed;
 
           // Save composed content as the wrapper's full content
