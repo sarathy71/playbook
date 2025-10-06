@@ -566,8 +566,9 @@
         <div class="title" style="z-index: 1;">Playbook</div>
       </div>
   <div class="flex" style="justify-content:center; flex: 1; margin: 0 120px 0 140px;">
-        <input id="inpTopic" type="text" placeholder="e.g., Neural Networks, Ramayana, Corporate Finance" style="margin-right: 8px; padding: 8px 12px; border: 1px solid var(--ring); border-radius: 6px; font-size: 14px; min-width: 300px;" />
-        <button id="btnGen" class="btn">Learn</button>
+  <input id="inpTopic" type="text" placeholder="e.g., Neural Networks, Ramayana, Corporate Finance" style="margin-right: 8px; padding: 8px 12px; border: 1px solid var(--ring); border-radius: 6px; font-size: 14px; min-width: 300px;" />
+  <button id="btnGen" class="btn">Learn</button>
+  <button id="btnNotes" class="btn btn-ghost" style="margin-left:8px; font-size:13px;">Notes</button>
       </div>
       
       <!-- Settings Panel -->
@@ -654,6 +655,7 @@
           <div class="settings-row">
         <button id="btnCopy" onclick="copyJSON()">Copy JSON</button>
         <button id="btnSave" onclick="saveNotebook()">Save Notebook</button>
+        <button id="btnRename" onclick="renameNotebook()">Rename Notebook</button>
         <button id="btnDeleteNotebook" onclick="deleteNotebook()">Delete Notebook</button>
         <button id="btnNewNotebook" onclick="newNotebookInNewTab()">New Notebook</button>
         </div>
@@ -768,6 +770,24 @@
       </div>
       <div id="notebookListBody">
         <div class="modal-loading">Loading notebooks...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notes Modal -->
+  <div id="notesModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+  <div class="modal-title" style="font-size:16px;">Notes</div>
+        <span class="modal-close" id="notesClose">&times;</span>
+      </div>
+      <div style="margin-bottom:8px;">
+        <textarea id="notesText" placeholder="Type your notes here..." style="width:100%; min-height:240px; padding:8px; border:1px solid var(--ring); border-radius:8px; resize:vertical;"></textarea>
+      </div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button id="notesClear" class="readbtn">Clear</button>
+        <button id="notesCancel" class="readbtn">Cancel</button>
+        <button id="notesSave" class="btn">Save</button>
       </div>
     </div>
   </div>
@@ -1003,6 +1023,7 @@ Requirements:
   let LAST_SAVED_NOTEBOOK_ID = null;
   // Keep a snapshot of the last saved notebook (serialized) so we can detect unsaved changes
   let LAST_SAVED_SNAPSHOT = null;
+  let NOTES = '';
     let CURRENT_TOC = [];
     let BREAD = [];                 // [{id,title}, ...]
     const EXP_CACHE = new Map();    // nodeId -> children[]
@@ -1158,6 +1179,9 @@ Requirements:
         readingWidth: READING_WIDTH
       };
 
+      // Attach user notes
+      try { notebook.notes = NOTES || ''; } catch (e) { notebook.notes = ''; }
+
       return notebook;
     }
 
@@ -1268,6 +1292,9 @@ Requirements:
           DEEP_WITH_CONTEXT.add(nodeId);
         }
       }
+
+      // Restore notes
+      NOTES = notebook.notes || '';
       
       // Migration: if no levels state but has content, seed Level 5
       if (notebook.version === "1.0.0" || (!notebook.levelsEnabled && notebook.content)) {
@@ -1460,6 +1487,81 @@ Requirements:
       } catch (e) {
         console.error("Failed to save notebook:", e);
         showError(`Failed to save notebook: ${e.message}`);
+      }
+    }
+
+    // Prompt user to rename the current notebook. If the notebook is server-backed,
+    // attempt to update the server record; otherwise save as a new notebook with the
+    // provided name (same behavior as Save but without changing contents).
+    async function renameNotebook() {
+      try {
+        const currentName = localStorage.getItem('lastSavedNotebookName') || '';
+        const newName = prompt('Rename notebook to:', currentName || $('inpTopic').value || 'untitled');
+        if (newName === null) return; // cancelled
+        const name = newName.trim() || (currentName || $('inpTopic').value || 'untitled');
+
+        // If this notebook has a server id, call save endpoint with id + new name
+        if (LAST_SAVED_NOTEBOOK_ID) {
+          flashSaveButton('pending');
+          try {
+            const resp = await fetch('/api/notebook/save', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: LAST_SAVED_NOTEBOOK_ID, name, notebook: serializeNotebook() })
+            });
+            if (!resp.ok) throw new Error(await resp.text());
+            const data = await resp.json();
+            if (data.id) LAST_SAVED_NOTEBOOK_ID = data.id;
+            localStorage.setItem('lastSavedNotebookId', LAST_SAVED_NOTEBOOK_ID || '');
+            localStorage.setItem('lastSavedNotebookName', data.name || name);
+            showToast('Notebook renamed', 'success');
+            flashSaveButton('success');
+            // Update URL to reflect new name
+            try {
+              const namePart = data.name ? encodeURIComponent(data.name) : encodeURIComponent(data.id);
+              const newPath = `/notebook/${namePart}`;
+              window.history.replaceState({}, '', newPath);
+            } catch (e) { /* ignore */ }
+            return;
+          } catch (e) {
+            console.error('Rename failed:', e);
+            showToast('Rename failed: ' + (e.message || ''), 'error');
+            flashSaveButton('error');
+            return;
+          }
+        }
+
+        // Not server-backed: offer to save as a new notebook with the chosen name
+        const saveAs = confirm('This notebook is not saved on the server. Save a new notebook with this name?');
+        if (!saveAs) return;
+
+        flashSaveButton('pending');
+        try {
+          const resp = await fetch('/api/notebook/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, notebook: serializeNotebook() })
+          });
+          if (!resp.ok) throw new Error(await resp.text());
+          const data = await resp.json();
+          LAST_SAVED_NOTEBOOK_ID = data.id;
+          localStorage.setItem('lastSavedNotebookId', data.id);
+          localStorage.setItem('lastSavedNotebookName', data.name || name);
+          showToast('Notebook saved as: ' + (data.name || name), 'success');
+          flashSaveButton('success');
+          try {
+            const namePart = data.name ? encodeURIComponent(data.name) : encodeURIComponent(data.id);
+            const newPath = `/notebook/${namePart}`;
+            window.history.replaceState({}, '', newPath);
+          } catch (e) { /* ignore */ }
+        } catch (e) {
+          console.error('Save-as failed:', e);
+          showToast('Save failed: ' + (e.message || ''), 'error');
+          flashSaveButton('error');
+        }
+      } catch (e) {
+        console.error('renameNotebook failed:', e);
+        showToast('Rename failed: ' + (e.message || ''), 'error');
       }
     }
 
@@ -5038,6 +5140,81 @@ Requirements:
             leftNavSidebar.style.display = 'block';
           }
         });
+
+        // Notes modal wiring
+        const btnNotes = $('btnNotes');
+        const notesModal = $('notesModal');
+        const notesText = $('notesText');
+        const notesSave = $('notesSave');
+        const notesCancel = $('notesCancel');
+        const notesClear = $('notesClear');
+        const notesClose = $('notesClose');
+
+        function openNotesModal() {
+          if (!notesModal || !notesText) return;
+          notesText.value = NOTES || '';
+          notesModal.style.display = 'block';
+        }
+        function closeNotesModal() { if (notesModal) notesModal.style.display = 'none'; }
+
+        if (btnNotes) btnNotes.addEventListener('click', (ev) => { ev.stopPropagation(); openNotesModal(); });
+        if (notesClose) notesClose.addEventListener('click', (ev) => { ev.stopPropagation(); closeNotesModal(); });
+        if (notesCancel) notesCancel.addEventListener('click', (ev) => { ev.stopPropagation(); closeNotesModal(); });
+
+        if (notesClear) notesClear.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          // Clear notes locally and close modal
+          NOTES = '';
+          if (notesText) notesText.value = '';
+          closeNotesModal();
+          // Persist change to backend if this notebook is saved on the server
+          try {
+            if (LAST_SAVED_NOTEBOOK_ID) {
+              const notebook = serializeNotebook();
+              // overwrite on server
+              await fetch('/api/notebook/save', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ id: LAST_SAVED_NOTEBOOK_ID, name: localStorage.getItem('lastSavedNotebookName') || notebook.config.topic || 'untitled', notebook })
+              });
+            } else {
+              // update snapshot for local autosave
+              LAST_SAVED_SNAPSHOT = JSON.stringify(serializeNotebook());
+            }
+          } catch (e) { console.warn('Failed to persist cleared notes:', e); }
+        });
+
+        if (notesSave) notesSave.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          if (!notesText) return;
+          NOTES = notesText.value || '';
+          // Persist notes by saving the notebook. If we have a server id, overwrite directly; otherwise, fall back to saveNotebook
+          try {
+            const notebook = serializeNotebook();
+            // If we have a server id, overwrite without prompting
+            if (LAST_SAVED_NOTEBOOK_ID) {
+              const resp = await fetch('/api/notebook/save', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ id: LAST_SAVED_NOTEBOOK_ID, name: localStorage.getItem('lastSavedNotebookName') || notebook.config.topic || 'untitled', notebook })
+              });
+              if (!resp.ok) throw new Error(await resp.text());
+              const data = await resp.json();
+              LAST_SAVED_NOTEBOOK_ID = data.id || LAST_SAVED_NOTEBOOK_ID;
+              localStorage.setItem('lastSavedNotebookId', LAST_SAVED_NOTEBOOK_ID);
+              if (data.name) localStorage.setItem('lastSavedNotebookName', data.name);
+              // update snapshot so close warning is accurate
+              LAST_SAVED_SNAPSHOT = JSON.stringify(serializeNotebook());
+              showToast('Notes saved', 'success');
+            } else {
+              // Fall back to existing saveNotebook flow which will prompt for a name
+              saveNotebook();
+            }
+          } catch (e) {
+            console.error('Failed to save notes:', e);
+            showToast('Failed to save notes: ' + (e.message || ''), 'error');
+          }
+          closeNotesModal();
+        });
+
       } catch (error) {
         console.error("Error initializing Topic Browser:", error);
       }
