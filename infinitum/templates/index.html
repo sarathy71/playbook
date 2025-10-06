@@ -2357,10 +2357,33 @@ Requirements:
         hideGlobalSpinner();
         return;
       }
-
-      // Find the chat container for this node
+      // Find the chat container for this node. The selection's container may be a
+      // deep child (e.g., a readbox or math element) so walk up the DOM to find
+      // an ancestor that contains the chat UI. If that fails, fall back to the
+      // currently rendered main content pane which holds the chat for the
+      // selected node.
       const nodeContainer = currentSelection.nodeContainer;
-      const chatContainer = nodeContainer.querySelector('.chat-container');
+      let chatContainer = null;
+      try {
+        if (nodeContainer && nodeContainer.closest) {
+          // Search for an ancestor that contains a .chat-container
+          let el = nodeContainer;
+          while (el && el !== document.body) {
+            if (el.querySelector && el.querySelector('.chat-container')) {
+              chatContainer = el.querySelector('.chat-container');
+              break;
+            }
+            el = el.parentElement;
+          }
+        }
+      } catch (e) {
+        // ignore and fallback
+      }
+      // Fallback: use the main selected-node content area
+      if (!chatContainer) {
+        const mainContent = document.querySelector('.selected-node-content');
+        if (mainContent) chatContainer = mainContent.querySelector('.chat-container');
+      }
       if (!chatContainer) return;
 
       // Pre-fill the chat input with the selection
