@@ -220,53 +220,53 @@ def _chat_json(model, temperature, system, user):
                 pass
             abort(r.status_code, r.text)
 
-    data = r.json()
-    print("DEV response data:", data)
-    # Accept multiple shapes: choices[0].message.content or choices[0].text
-    choice0 = data.get('choices', [{}])[0] or {}
-    text = (choice0.get('message') or {}).get('content') or choice0.get('text') or ''
+        data = r.json()
+        print("DEV response data:", data)
+        # Accept multiple shapes: choices[0].message.content or choices[0].text
+        choice0 = data.get('choices', [{}])[0] or {}
+        text = (choice0.get('message') or {}).get('content') or choice0.get('text') or ''
 
-    # Try to parse JSON from the returned text. Handle common dev-server formats:
-    # - Raw JSON
-    # - JSON inside a ```json ... ``` fenced code block
-    # - JSON embedded somewhere in the text (first {...} match)
-    import re
-    txt = (text or "").strip()
+        # Try to parse JSON from the returned text. Handle common dev-server formats:
+        # - Raw JSON
+        # - JSON inside a ```json ... ``` fenced code block
+        # - JSON embedded somewhere in the text (first {...} match)
+        import re
+        txt = (text or "").strip()
 
-    # Direct parse
-    try:
-        parsed = json.loads(txt)
-        return parsed, data
-    except Exception:
-        pass
-
-    # Fenced ```json ... ``` blocks
-    m = re.search(r"```json\s*([\s\S]*?)```", txt, re.IGNORECASE)
-    if m:
-        candidate = m.group(1).strip()
+        # Direct parse
         try:
-            parsed = json.loads(candidate)
+            parsed = json.loads(txt)
             return parsed, data
         except Exception:
             pass
 
-    # First JSON object substring (non-greedy)
-    m2 = re.search(r"\{[\s\S]*?\}", txt)
-    if m2:
-        candidate = m2.group(0)
+        # Fenced ```json ... ``` blocks
+        m = re.search(r"```json\s*([\s\S]*?)```", txt, re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip()
+            try:
+                parsed = json.loads(candidate)
+                return parsed, data
+            except Exception:
+                pass
+
+        # First JSON object substring (non-greedy)
+        m2 = re.search(r"\{[\s\S]*?\}", txt)
+        if m2:
+            candidate = m2.group(0)
+            try:
+                parsed = json.loads(candidate)
+                return parsed, data
+            except Exception:
+                pass
+
+        # As a last attempt, try parsing choice.message.content directly
         try:
-            parsed = json.loads(candidate)
+            alt = (choice0.get('message') or {}).get('content', '')
+            parsed = json.loads(alt or "{}")
             return parsed, data
         except Exception:
-            pass
-
-    # As a last attempt, try parsing choice.message.content directly
-    try:
-        alt = (choice0.get('message') or {}).get('content', '')
-        parsed = json.loads(alt or "{}")
-        return parsed, data
-    except Exception:
-        abort(500, f"Dev server returned invalid JSON in completions text; raw text starts: {txt[:400]}")
+            abort(500, f"Dev server returned invalid JSON in completions text; raw text starts: {txt[:400]}")
     else:
         # Live OpenAI Chat completions path (chat messages + JSON response format)
         url = 'https://api.openai.com/v1/chat/completions'

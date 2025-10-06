@@ -3300,8 +3300,9 @@ Requirements:
           }
           finalComposed += detailed;
 
-          // Save composed content as the wrapper's full content
-          CONTENT.set(overviewId, finalComposed);
+          // Normalize math delimiters and save composed content as the wrapper's full content
+          const normalizedFinalComposed = normalizeMathDelimiters(finalComposed);
+          CONTENT.set(overviewId, normalizedFinalComposed);
 
           // Store summary for UI (summary box) if available
           if (summary) SUMMARIES.set(overviewId, summary);
@@ -3364,6 +3365,20 @@ Requirements:
   renderTree(CURRENT_TOC);
 }
         }
+        // Ensure math is typeset for the newly inserted overview content.
+        // Run a slightly delayed typeset so the DOM has fully updated.
+        setTimeout(() => {
+          try {
+            const readbox = document.querySelector('.selected-node-content .readbox');
+            if (readbox) {
+              typesetMath(readbox).then(() => emitContentRendered(wrapper.id)).catch(() => emitContentRendered(wrapper.id));
+            } else {
+              typesetMath().then(() => emitContentRendered(wrapper.id)).catch(() => emitContentRendered(wrapper.id));
+            }
+          } catch (e) {
+            try { emitContentRendered(wrapper.id); } catch (_) {}
+          }
+        }, 80);
         }
         renderBreadcrumb();
         
