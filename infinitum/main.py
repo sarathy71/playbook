@@ -496,6 +496,81 @@ Style:
             resp_obj["firstContentMeta"] = first_content_meta
     return jsonify(resp_obj)
 
+
+@app.post("/api/foundations")
+def api_foundations():
+    body = request.get_json(force=True, silent=True) or {}
+    topic = body.get("topic", "").strip()
+    if not topic:
+        abort(400, "Topic is required.")
+    audience = body.get("audience", "general")
+    depth = int(body.get("depth", 3))
+    sections = int(body.get("sections", 5))
+    model = body.get("model", "gpt-4.1-mini")
+    temperature = float(body.get("temperature", 0.3))
+
+    # Optional node context (id/title) to focus the Foundations guide
+    node = body.get("node") or {}
+    first = node or {}
+
+    level = 5
+    level_instruction = "Explain for an informed learner: comprehensive overview with good balance of intuition and technical details."
+
+    user_prompt_read = f"""
+Write an exhaustive, structured "Foundations" guide that lists the *necessary prerequisite topics* a learner must master to thoroughly understand the selected outline item. Produce the output in Markdown (headings, short paragraphs, and bullet lists) suitable as a study checklist and teaching scaffold.
+
+Global Topic: {topic}
+Audience: {audience}
+Proficiency Level: {level}/10 - {level_instruction}
+Depth preference (context): {depth}
+Approx sections per level (context): {sections}
+
+Breadcrumb (root->current): {''}
+Current Item: {first.get('title','')}
+Current Item ID: {first.get('id','')}
+
+Requirements & structure:
+- Length: ~400–900 words (aim for thoroughness and clarity).
+- Output ONLY Markdown (no JSON).
+- Top-level heading: "# Foundations for <Current Item>" (use the actual current item title).
+- Start with a 2–3 sentence summary describing the role of these foundations — how the prerequisites enable understanding of the current item.
+- Provide an ordered list of 4–8 **Essential Prerequisite Topics**. For *each* prerequisite topic include:
+  1. A clear subheading (###) with a concise title (3–6 words).
+  2. A focused overview (2–4 sentences) explaining *what* the prerequisite is and *why* it matters specifically for the current item.
+  3. A "Key pointers" bullet list (3–5 actionable items), including:
+     - concrete concepts to master,
+     - minimal formulas or definitions to memorize,
+     - canonical examples to study,
+     - short practice tasks or exercises, and
+     - one concise recommended resource (textbook chapter title, keyword, or short URL phrase).
+- After the prerequisite list include:
+  - "Minimal skills checklist" (3–8 short bullets of concrete abilities a learner should have before proceeding).
+  - "Suggested study order" (2–6 sequential steps to learn the prerequisites efficiently).
+  - "Concise resource recommendations" (1–4 short entries—titles or brief links—to begin learning).
+- Use $...$ for inline math and $$...$$ for display math where a formula is necessary. Do not put math inside code fences.
+- Tone: instructive, practical, audience-appropriate; match the specified proficiency level and avoid abstract platitudes.
+
+Style guidelines:
+- Prioritize concreteness: each prerequisite overview should tell the learner exactly *what* to study and *how* to practice it.
+- Use headings, short paragraphs, and bullet lists for scan-ability.
+- Avoid lengthy historical narrative unless it directly explains why a prerequisite exists; prefer actionable learning advice.
+- Do not produce JSON or extra metadata.
+
+Example outline (format only):
+# Foundations for {first.get('title','')}
+Short summary...
+""".strip()
+
+    try:
+        content, raw = _chat_text(model, temperature,
+                                  "You are an expert curriculum designer. Produce a Foundations guide in Markdown as specified.",
+                                  [{"role": "user", "content": user_prompt_read}])
+        if not content or not isinstance(content, str):
+            abort(500, "Foundations generation failed: no content returned")
+        return jsonify({"content": content, "model": raw.get("model"), "tokens": raw.get("usage")})
+    except Exception as e:
+        abort(500, f"Foundations generation failed: {e}")
+
 @app.post("/api/expand")
 def api_expand():
     body = request.get_json(force=True, silent=True) or {}
@@ -621,70 +696,49 @@ Return only the summary as plain text.
 
 @app.post("/api/chat")
 def api_chat():
+    """Handle a simple chat request. Expected JSON body:
+    { topic, audience, node, path, question, context, history, model, temperature }
+    The endpoint uses the provided `context` (if any) as the primary source for answers.
+    """
     body = request.get_json(force=True, silent=True) or {}
     topic = body.get("topic", "").strip()
-    node = body.get("node", {})
-    path = body.get("path", [])
     audience = body.get("audience", "general")
+    node = body.get("node") or {}
+    path = body.get("path") or []
+    question = (body.get("question") or "").strip()
+    context = body.get("context", "") or ""
+    history = body.get("history", []) or []
     model = body.get("model", "gpt-4.1-mini")
     temperature = float(body.get("temperature", 0.3))
-    question = (body.get("question") or "").strip()
-    context = body.get("context") or ""  # the 'Read' content under the node
-    history = body.get("history") or []  # [{role, content}...]
-    level = body.get("level")  # Optional level for level-aware responses
 
-    if not topic or not node or not question:
-        abort(400, "Missing topic, node, or question.")
+    if not question:
+        abort(400, "question is required")
 
-    # Level-aware system prompt
-    level_instruction = ""
-    if level:
-        level_descriptions = {
-            1: "Answer as if speaking to a curious child: use simple analogies, avoid jargon, focus on understanding.",
-            2: "Answer for someone with basic knowledge: use simple concepts, minimal technical terms.",
-            3: "Answer for an introductory learner: use key concepts and intuition, basic terminology.",
-            4: "Answer for an intermediate learner: balanced explanation with some technical details.",
-            5: "Answer for an informed learner: comprehensive overview with good balance of intuition and technical details.",
-            6: "Answer for an advanced learner: detailed explanation with mathematical concepts, technical terminology.",
-            7: "Answer for an expert: rigorous treatment with derivations, formal definitions, advanced mathematics.",
-            8: "Answer for a specialist: formal treatment with proofs, advanced formalism, specialized terminology.",
-            9: "Answer for a researcher: cutting-edge concepts, advanced formalism, research-level depth.",
-            10: "Answer at maximum expertise level: complete formalism, rigorous proofs, advanced mathematics."
-        }
-        level_instruction = f" Match the requested proficiency level {level}/10: {level_descriptions.get(level, level_descriptions[5])}."
-
+    # Build a concise system instruction guiding the assistant to prefer the provided context
     system = (
-        "Answer strictly using the provided section context unless the question is generic. "
-        "Be concise and clear. Use Markdown and LaTeX for math when appropriate. "
-        "For math expressions, use $...$ for inline math or $$...$$ for display math. "
-        "Do not surround TeX with normal parentheses or brackets, and do not put math inside code fences." + level_instruction
+        "You are a helpful assistant. Use the provided context as the primary source when answering. "
+        "If the answer is not present in the context, be honest and provide brief, relevant guidance. "
+        "Use Markdown formatting and $...$ / $$...$$ for math when appropriate."
     )
 
-    messages = [
-        {
-            "role": "user",
-            "content": f"""Context (from the selected item):
-{context}
+    messages = []
+    # If a long context is provided, include it as an initial system/user message
+    if context:
+        messages.append({"role": "system", "content": f"Context:\n{context}"})
 
-Config:
-- Topic: {topic}
-- Audience: {audience}
-- Breadcrumb: {' > '.join([p.get('title','') for p in path])}
-- Item: {node.get('title','')} (ID: {node.get('id','')})
+    # Append recent history if any (user/assistant turns)
+    for h in (history or [])[-10:]:
+        if h.get("role") in ("user", "assistant"):
+            messages.append({"role": h.get("role"), "content": h.get("content", "")})
 
-You will now answer questions about this item only.
-"""
-        }
-    ]
-    # append last few turns
-    for m in history[-6:]:
-        if m.get("role") in ("user", "assistant"):
-            messages.append({"role": m["role"], "content": m.get("content","")})
-    # the new question
-    messages.append({"role": "user", "content": question})
+    # Finally add the user's question
+    messages.append({"role": "user", "content": f"Question: {question}"})
 
-    answer, raw = _chat_text(model, temperature, system, messages)
-    return jsonify({"answer": answer, "model": raw.get("model"), "tokens": raw.get("usage")})
+    try:
+        answer, raw = _chat_text(model, temperature, system, messages)
+        return jsonify({"answer": answer, "model": raw.get("model"), "tokens": raw.get("usage")})
+    except Exception as e:
+        abort(500, f"Chat generation failed: {e}")
 
 @app.get("/api/videos")
 def api_videos():

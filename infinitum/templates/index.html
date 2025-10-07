@@ -568,6 +568,7 @@
   <div class="flex" style="justify-content:center; flex: 1; margin: 0 120px 0 140px;">
   <input id="inpTopic" type="text" placeholder="e.g., Neural Networks, Ramayana, Corporate Finance" style="margin-right: 8px; padding: 8px 12px; border: 1px solid var(--ring); border-radius: 6px; font-size: 14px; min-width: 300px;" />
   <button id="btnGen" class="btn">Learn</button>
+  <button id="btnFoundations" class="btn btn-ghost" style="margin-left:8px; font-size:13px;">Foundations</button>
   <button id="btnNotes" class="btn btn-ghost" style="margin-left:8px; font-size:13px;">Notes</button>
       </div>
       
@@ -995,11 +996,6 @@ Requirements:
       { id: "intro", title: "Introduction", description: "What this topic covers and how to navigate the material.", children:[
         { id: "basics/what-why", title: "What & Why" },
         { id: "basics/terminology", title: "Key Terminology" }
-      ]},
-      { id: "foundations", title: "Foundations", children:[
-        { id: "foundations/concepts", title: "Core Concepts" },
-        { id: "foundations/math", title: "Math & Intuition" },
-        { id: "foundations/tools", title: "Tooling & Setup" }
       ]},
       { id: "intermediate", title: "Intermediate", children:[
         { id: "intermediate/patterns", title: "Common Patterns" },
@@ -2679,6 +2675,13 @@ Requirements:
       
       
       nodeDiv.addEventListener('click', () => {
+        // Special-case: clicking the top-level Foundations wrapper should fetch prerequisite
+        if ((node.id === 'foundations' || (node.id||'').endsWith('/foundations')) && (!node.children || node.children.length === 0)) {
+          // Keep UI selection visible
+          selectNodeInLeftNav(node.id);
+          fetchFoundations(node);
+          return;
+        }
         selectNodeInLeftNav(node.id);
 
         // If levels UI is enabled for this node, ensure the active level is loaded
@@ -3039,6 +3042,51 @@ Requirements:
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
+    // Initialize a simple chat UI for Foundations content (no nodeId)
+    function initializeChatForFoundations(markdownContent, chatContainer) {
+      const chatInput = chatContainer.querySelector('.chat-input');
+      const chatSendBtn = chatContainer.querySelector('.chat-send-btn');
+      const messagesContainer = chatContainer.querySelector('.chat-messages');
+
+      chatSendBtn.addEventListener('click', async () => {
+        const question = chatInput.value.trim();
+        if (!question) return;
+        chatInput.value = '';
+        const userMsgDiv = document.createElement('div');
+        userMsgDiv.className = 'chat-message user';
+        userMsgDiv.textContent = question;
+        messagesContainer.appendChild(userMsgDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        // Call server /api/chat with context = markdownContent
+        try {
+          const topic = $('inpTopic').value.trim();
+          const audience = $('inpAudience').value.trim() || 'general';
+          const model = $('selModel').value;
+          const temperature = parseFloat($('inpTemp').value || '0.3');
+
+          const resp = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ topic, audience, model, temperature, node: { id: 'foundations', title: 'Foundations' }, path: [], question, context: markdownContent, history: [] })
+          });
+          if (!resp.ok) throw new Error(await resp.text());
+          const data = await resp.json();
+          const assistantMsgDiv = document.createElement('div');
+          assistantMsgDiv.className = 'chat-message assistant';
+          assistantMsgDiv.innerHTML = renderMarkdown(data.answer || data.answer || 'No answer.');
+          messagesContainer.appendChild(assistantMsgDiv);
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          setTimeout(() => typesetMath(assistantMsgDiv), 30);
+        } catch (e) {
+          const errDiv = document.createElement('div');
+          errDiv.className = 'chat-message assistant';
+          errDiv.textContent = 'Error: ' + (e.message || String(e));
+          messagesContainer.appendChild(errDiv);
+        }
+      });
+    }
+
     // ----------------------- Levels Management Functions -----------------------
     function toggleLevels(nodeId) {
       try {
@@ -3340,6 +3388,25 @@ Requirements:
             return true;
           }
         });
+
+        // Prepend a Foundations child so the deep-dive wrapper always exposes
+        // prerequisite background as the first child. The click handler will
+        // call /api/foundations when this child is clicked (client-side logic
+        // treats any node id that ends with '/foundations' specially).
+        try {
+          const foundationsChildId = `${wrapper.id}/foundations`;
+          // Avoid duplicates
+          if (!wrapper.children.some(c => c.id === foundationsChildId)) {
+            const foundationsChild = {
+              id: foundationsChildId,
+              title: 'Foundations',
+              description: 'Prerequisite background and foundational concepts.'
+            };
+            wrapper.children.unshift(foundationsChild);
+          }
+        } catch (e) {
+          console.warn('Failed to prepend Foundations child to deep-dive wrapper:', e);
+        }
 
         // Create undo snapshot
         const undoSnapshot = {
@@ -4382,6 +4449,99 @@ Requirements:
       autosave();
     }
 
+    // Fetch Foundations section (prerequisite background) from server and inject as children
+    async function fetchFoundations(node) {
+      const topic = $("inpTopic").value.trim();
+      const audience = $("inpAudience").value.trim() || "general";
+      const depth = parseInt($("inpDepth").value || "3", 10);
+      const sections = parseInt($("inpSections").value || "5", 10);
+      const model = $("selModel").value;
+      const temperature = parseFloat($("inpTemp").value || "0.3", 10);
+
+      // If mock mode, create a small mock foundations structure
+      if (!LIVE) {
+        const base = slug('foundations');
+        const kids = [
+          { id: `${node.id}/${base}-concepts`, title: 'Conceptual Roots', description: 'Key concepts and antecedent ideas.' },
+          { id: `${node.id}/${base}-math`, title: 'Mathematical Tools', description: 'Essential math and formalisms.' },
+          { id: `${node.id}/${base}-history`, title: 'Historical Development', description: 'Historical context and key thinkers.' }
+        ];
+        injectChildren(node.id, kids, []);
+        EXPANDED.add(node.id);
+        renderLeftNavTree();
+        if (kids.length) selectNodeInLeftNav(kids[0].id);
+        autosave();
+        return;
+      }
+
+      try {
+        // Call server to generate a single Markdown 'Foundations' guide for the
+        // currently selected node. The server returns Markdown in `content`.
+        const resp = await fetch('/api/foundations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ topic, audience, depth, sections, model, temperature, node: { id: node.id, title: node.title } })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+
+        // Expect server to return { content: <markdown> } (we'll accept toc too but prefer content)
+        const md = data.content || (data.toc ? null : null);
+        if (!md) {
+          showError('Foundations endpoint returned no content.');
+          return;
+        }
+
+        // Render the returned markdown directly into the main pane without mutating the TOC.
+        const mainContentPane = $("mainContentPane");
+        if (mainContentPane) {
+          const contentDiv = document.createElement('div');
+          contentDiv.className = 'selected-node-content';
+          const readbox = document.createElement('div');
+          readbox.className = 'readbox';
+          readbox.innerHTML = renderMarkdown(md);
+          contentDiv.appendChild(readbox);
+
+          // Add a simple chat container so users can ask questions about the Foundations content
+          const chatContainer = document.createElement('div');
+          chatContainer.className = 'chat-container';
+          chatContainer.innerHTML = `
+            <div class="chat-header">Ask questions about Foundations for "${escapeHtml(node.title || topic)}"</div>
+            <div class="chat-messages"></div>
+            <div class="chat-input-container">
+              <input type="text" class="chat-input" placeholder="Ask a question..." />
+              <button class="chat-send-btn">Send</button>
+            </div>
+          `;
+          contentDiv.appendChild(chatContainer);
+
+          mainContentPane.innerHTML = '';
+          mainContentPane.appendChild(contentDiv);
+
+          // Typeset math and initialize chat handlers
+          setTimeout(() => typesetMath(readbox).then(() => emitContentRendered(null)).catch(() => emitContentRendered(null)), 30);
+          initializeChatForFoundations(md, chatContainer);
+        }
+        autosave();
+      } catch (e) {
+        showError('Failed to fetch Foundations: ' + (e.message || String(e)));
+      }
+    }
+
+    // Wire the top-level Foundations button to fetch foundations for the current topic/title
+    document.addEventListener('DOMContentLoaded', () => {
+      const btn = $('btnFoundations');
+      if (!btn) return;
+      btn.addEventListener('click', async (ev) => {
+        ev.preventDefault();
+        const topic = $('inpTopic').value.trim();
+        // Create a synthetic node object to pass into fetchFoundations: use the topic as title
+        const fakeNode = { id: `topic/${slug(topic || 'root')}`, title: topic || 'Topic' };
+        // Call the same fetchFoundations flow which will place the markdown into the right pane
+        await fetchFoundations(fakeNode);
+      });
+    });
+
     async function readSection(node, path) {
       for (const p of path) EXPANDED.add(p.id);
 
@@ -4534,6 +4694,14 @@ Requirements:
           result = await resp.json();
         }
         CURRENT_TOC = result.toc || [];
+        // Prepend a top-level Foundations node so users can load prerequisite background
+        // If a server-provided Foundations node already exists, prefer it (avoid duplicate)
+        const existingFound = CURRENT_TOC.find(n => (n.id||'').endsWith('/foundations') || n.id === 'foundations' || (n.title||'').toLowerCase() === 'foundations');
+        if (!existingFound) {
+          // create a shallow Foundations wrapper. Children will be fetched on demand.
+          const foundationsNode = { id: 'foundations', title: 'Foundations', description: 'Prerequisite background and foundational concepts.' };
+          CURRENT_TOC.unshift(foundationsNode);
+        }
         CURRENT_TOC.forEach(n => EXPANDED.add(n.id));
         const topCountEl = document.getElementById("topCount");
         if (topCountEl) topCountEl.textContent = CURRENT_TOC.length;
