@@ -4474,6 +4474,15 @@ Requirements:
         return;
       }
 
+      // Disable the Foundations button immediately to indicate the request is in progress
+      const foundationsBtn = $('btnFoundations');
+      let oldBtnText = null;
+      if (foundationsBtn) {
+        oldBtnText = foundationsBtn.textContent;
+        foundationsBtn.disabled = true;
+        foundationsBtn.textContent = 'Loading…';
+      }
+
       try {
         // Call server to generate a single Markdown 'Foundations' guide for the
         // currently selected node. The server returns Markdown in `content`.
@@ -4485,46 +4494,89 @@ Requirements:
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
 
-        // Expect server to return { content: <markdown> } (we'll accept toc too but prefer content)
-        const md = data.content || (data.toc ? null : null);
+        // Expect server to return { content: <markdown> }
+        const md = data.content || null;
         if (!md) {
           showError('Foundations endpoint returned no content.');
           return;
         }
 
-        // Render the returned markdown directly into the main pane without mutating the TOC.
-        const mainContentPane = $("mainContentPane");
-        if (mainContentPane) {
-          const contentDiv = document.createElement('div');
-          contentDiv.className = 'selected-node-content';
-          const readbox = document.createElement('div');
-          readbox.className = 'readbox';
-          readbox.innerHTML = renderMarkdown(md);
-          contentDiv.appendChild(readbox);
+        // Create a unique child node that will reference this Foundations content
+        const base = slug('foundations');
+        let childId = `${node.id}/${base}`;
+        // Ensure uniqueness
+        let suffix = 1;
+        while (findNodeById(CURRENT_TOC, childId)) {
+          childId = `${node.id}/${base}-${suffix}`;
+          suffix += 1;
+        }
 
-          // Add a simple chat container so users can ask questions about the Foundations content
-          const chatContainer = document.createElement('div');
-          chatContainer.className = 'chat-container';
-          chatContainer.innerHTML = `
-            <div class="chat-header">Ask questions about Foundations for "${escapeHtml(node.title || topic)}"</div>
-            <div class="chat-messages"></div>
-            <div class="chat-input-container">
-              <input type="text" class="chat-input" placeholder="Ask a question..." />
-              <button class="chat-send-btn">Send</button>
-            </div>
-          `;
-          contentDiv.appendChild(chatContainer);
+        const child = {
+          id: childId,
+          title: 'Foundations',
+          description: 'Prerequisite background and foundational concepts.',
+          readContent: md
+        };
 
-          mainContentPane.innerHTML = '';
-          mainContentPane.appendChild(contentDiv);
+        // Insert the new child as the FIRST child under the provided node (or top-level if node not found)
+        const parent = findNodeById(CURRENT_TOC, node.id);
+        if (parent) {
+          const ancestorPath = getNodePath(node.id) || [];
+          const existing = parent.children || [];
+          const newKids = [child, ...existing];
+          // injectChildren will normalize readContent and stash it in CONTENT
+          injectChildren(node.id, newKids, ancestorPath.slice(0, -1));
+          EXPANDED.add(node.id);
+          // Select the newly created Foundations child in the left nav
+          selectNodeInLeftNav(child.id);
+        } else {
+          // Parent not found (synthetic topic). Add as a top-level item as the first child of the TOC
+          CURRENT_TOC.unshift(child);
+          // Normalize and stash readContent so the renderer can show it immediately
+          try {
+            const normalized = normalizeMathDelimiters(child.readContent || '');
+            CONTENT.set(child.id, normalized);
+            generateSummary(child.id, normalized).then((s) => { if (s) SUMMARIES.set(child.id, s); autosave(); }).catch(() => {});
+          } catch (e) {
+            console.warn('Failed to normalize/stash top-level Foundations readContent', e);
+          }
+          EXPANDED.add(child.id);
+          renderLeftNavTree();
+          selectNodeInLeftNav(child.id);
+        }
 
-          // Typeset math and initialize chat handlers
-          setTimeout(() => typesetMath(readbox).then(() => emitContentRendered(null)).catch(() => emitContentRendered(null)), 30);
+        // Render the content area and append the chat UI under the readbox for this new child
+        const readbox = document.querySelector('.selected-node-content .readbox');
+        if (readbox) {
+          // Ensure normalized math delimiters and typeset
+          typesetMath(readbox).catch(() => {});
+          // Append chat container below the readbox
+          let chatContainer = document.querySelector('.selected-node-content .chat-container');
+          if (!chatContainer) {
+            chatContainer = document.createElement('div');
+            chatContainer.className = 'chat-container';
+            chatContainer.innerHTML = `
+              <div class="chat-header">Ask questions about Foundations for "${escapeHtml(node.title || topic)}"</div>
+              <div class="chat-messages"></div>
+              <div class="chat-input-container">
+                <input type="text" class="chat-input" placeholder="Ask a question..." />
+                <button class="chat-send-btn">Send</button>
+              </div>
+            `;
+            readbox.parentNode.appendChild(chatContainer);
+          }
           initializeChatForFoundations(md, chatContainer);
         }
+
         autosave();
       } catch (e) {
         showError('Failed to fetch Foundations: ' + (e.message || String(e)));
+      } finally {
+        // Restore the button state
+        if (foundationsBtn) {
+          foundationsBtn.disabled = false;
+          if (oldBtnText) foundationsBtn.textContent = oldBtnText;
+        }
       }
     }
 
@@ -4694,14 +4746,9 @@ Requirements:
           result = await resp.json();
         }
         CURRENT_TOC = result.toc || [];
-        // Prepend a top-level Foundations node so users can load prerequisite background
-        // If a server-provided Foundations node already exists, prefer it (avoid duplicate)
-        const existingFound = CURRENT_TOC.find(n => (n.id||'').endsWith('/foundations') || n.id === 'foundations' || (n.title||'').toLowerCase() === 'foundations');
-        if (!existingFound) {
-          // create a shallow Foundations wrapper. Children will be fetched on demand.
-          const foundationsNode = { id: 'foundations', title: 'Foundations', description: 'Prerequisite background and foundational concepts.' };
-          CURRENT_TOC.unshift(foundationsNode);
-        }
+        // Note: do NOT insert a top-level "Foundations" node into the TOC here.
+        // Foundations is available via the dedicated button and is intentionally
+        // not included as a persistent TOC item.
         CURRENT_TOC.forEach(n => EXPANDED.add(n.id));
         const topCountEl = document.getElementById("topCount");
         if (topCountEl) topCountEl.textContent = CURRENT_TOC.length;
