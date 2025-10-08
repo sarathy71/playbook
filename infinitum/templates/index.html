@@ -1209,7 +1209,7 @@ Requirements:
         $("inpTopic").value = notebook.config.topic || "";
         $("inpAudience").value = notebook.config.audience || "general";
         $("inpDepth").value = notebook.config.depth || 3;
-        $("inpSections").value = notebook.config.sections || 5;
+  $("inpSections").value = notebook.config.sections || 5;
         $("selModel").value = notebook.config.model || "gpt-4.1-mini";
         $("inpTemp").value = notebook.config.temperature || 0.3;
         $("tempVal").textContent = Number(notebook.config.temperature || 0.3).toFixed(2);
@@ -1310,12 +1310,12 @@ Requirements:
       // Restore notes
       NOTES = notebook.notes || '';
       
-      // Migration: if no levels state but has content, seed Level 5
+      // Migration: if no levels state but has content, seed Beginner (Level 1)
       if (notebook.version === "1.0.0" || (!notebook.levelsEnabled && notebook.content)) {
         for (const [nodeId, content] of Object.entries(notebook.content || {})) {
           if (content && !LEVEL_CONTENT.has(nodeId)) {
             LEVEL_CONTENT.set(nodeId, new Map());
-            LEVEL_CONTENT.get(nodeId).set(5, content);
+            LEVEL_CONTENT.get(nodeId).set(1, content);
           }
         }
       }
@@ -1662,7 +1662,7 @@ Requirements:
 
       // If levels are enabled for this node, clear the active level cache and re-fetch
       if (LEVELS_ENABLED.has(nodeId)) {
-        const activeLevel = ACTIVE_LEVEL.get(nodeId) || 5;
+        const activeLevel = ACTIVE_LEVEL.get(nodeId) || 1;
         const levelMap = LEVEL_CONTENT.get(nodeId);
         if (levelMap) {
           levelMap.delete(activeLevel);
@@ -2690,11 +2690,38 @@ Requirements:
       
       leftNavTree.appendChild(ul);
       
-      // Auto-select first node if none selected
+      // Auto-select first node if none selected and attempt to auto-load its content
       if (!SELECTED_NODE_ID && CURRENT_TOC.length > 0) {
         const firstNode = findFirstSelectableNode(CURRENT_TOC);
         if (firstNode) {
           selectNodeInLeftNav(firstNode.id);
+
+          // Auto-load content for the first node so the user sees it immediately
+          try {
+            // If levels are enabled for this node, fetch the active level content
+            if (LEVELS_ENABLED.has(firstNode.id)) {
+              const activeLevel = ACTIVE_LEVEL.get(firstNode.id) || 1;
+              if (!LEVEL_CONTENT.get(firstNode.id)?.has(activeLevel) && !LEVEL_READING.has(`${firstNode.id}@${activeLevel}`)) {
+                const mainContentPane = $("mainContentPane");
+                if (mainContentPane) {
+                  mainContentPane.innerHTML = '<div class="loading-indicator"><p><em>Loading...</em></p></div>';
+                }
+                fetchLevelContent(firstNode.id, activeLevel);
+              }
+            } else {
+              // Single-content mode: trigger a full read if content isn't cached
+              if (!CONTENT.has(firstNode.id) && !READING.has(firstNode.id)) {
+                const mainContentPane = $("mainContentPane");
+                if (mainContentPane) mainContentPane.innerHTML = '<div class="loading-indicator"><p><em>Loading...</em></p></div>';
+                readSection(firstNode, getNodePath(firstNode.id)).catch((e) => {
+                  console.warn('Auto-read failed for first node:', firstNode.id, e);
+                  showError('Failed to load first section: ' + (e.message || String(e)));
+                });
+              }
+            }
+          } catch (e) {
+            console.warn('Auto-load of first node failed:', e);
+          }
         }
       }
       
@@ -2760,7 +2787,7 @@ Requirements:
 
         // If levels UI is enabled for this node, ensure the active level is loaded
         if (LEVELS_ENABLED.has(node.id)) {
-          const activeLevel = ACTIVE_LEVEL.get(node.id) || 5;
+          const activeLevel = ACTIVE_LEVEL.get(node.id) || 1;
           if (!LEVEL_CONTENT.get(node.id)?.has(activeLevel) && !LEVEL_READING.has(`${node.id}@${activeLevel}`)) {
             const mainContentPane = $("mainContentPane");
             if (mainContentPane) {
@@ -2857,7 +2884,7 @@ Requirements:
       // Add content or Levels UI
       console.log(`renderSelectedNodeContent: nodeId=${nodeId}, LEVELS_ENABLED.has(nodeId)=${LEVELS_ENABLED.has(nodeId)}`);
       if (LEVELS_ENABLED.has(nodeId)) {
-        const activeLevel = ACTIVE_LEVEL.get(nodeId) || 5;
+        const activeLevel = ACTIVE_LEVEL.get(nodeId) || 1;
         console.log(`Creating levels UI with activeLevel=${activeLevel}`);
 
         // Create tabs container
@@ -2900,7 +2927,7 @@ Requirements:
         contentDiv.appendChild(levelContentDiv);
         
         // Add chat interface after levels content is rendered
-        const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 5)})` : "";
+  const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 1)})` : "";
         const chatContainer = document.createElement('div');
         chatContainer.className = 'chat-container';
         chatContainer.innerHTML = `
@@ -2922,7 +2949,7 @@ Requirements:
         setTimeout(() => typesetMath(readbox).then(() => emitContentRendered(nodeId)).catch(() => emitContentRendered(nodeId)), 30);
         
         // Add chat interface after text content is rendered
-        const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 5)})` : "";
+  const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 1)})` : "";
         const chatContainer = document.createElement('div');
         chatContainer.className = 'chat-container';
         chatContainer.innerHTML = `
@@ -2945,7 +2972,7 @@ Requirements:
         setTimeout(() => typesetMath(readbox).then(() => emitContentRendered(nodeId)).catch(() => emitContentRendered(nodeId)), 30);
 
         // Add chat interface below the summary so users can ask questions immediately
-        const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 5)})` : "";
+  const levelInfo = LEVELS_ENABLED.has(nodeId) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(nodeId) || 1)})` : "";
         const chatContainer = document.createElement('div');
         chatContainer.className = 'chat-container';
         chatContainer.innerHTML = `
@@ -3171,31 +3198,31 @@ Requirements:
           // Turn OFF levels
           console.log('Turning OFF levels');
           LEVELS_ENABLED.delete(nodeId);
-          
-          // Restore Level 5 content to main CONTENT
-          const level5Content = LEVEL_CONTENT.get(nodeId)?.get(5) || "";
-          CONTENT.set(nodeId, level5Content);
-          
+
+          // Restore Beginner (Level 1) content to main CONTENT
+          const level1Content = LEVEL_CONTENT.get(nodeId)?.get(1) || "";
+          CONTENT.set(nodeId, level1Content);
+
           // Clear active level
           ACTIVE_LEVEL.delete(nodeId);
-          
+
         } else {
           // Turn ON levels
           console.log('Turning ON levels');
           LEVELS_ENABLED.add(nodeId);
-          
+
           // Initialize level content map if not exists
           if (!LEVEL_CONTENT.has(nodeId)) {
             LEVEL_CONTENT.set(nodeId, new Map());
           }
-          
-          // Seed Level 5 with existing content
-          const existingContent = CONTENT.get(nodeId) || "Click 'Read' to load a Level 5 explanation";
-          LEVEL_CONTENT.get(nodeId).set(5, existingContent);
-          
-          // Set active level to 5
-          ACTIVE_LEVEL.set(nodeId, 5);
-          
+
+          // Seed Level 1 (Beginner) with existing content
+          const existingContent = CONTENT.get(nodeId) || "Click 'Read' to load a Beginner explanation";
+          LEVEL_CONTENT.get(nodeId).set(1, existingContent);
+
+          // Set active level to 1 (Beginner)
+          ACTIVE_LEVEL.set(nodeId, 1);
+
           // Clear main content to avoid duplication
           CONTENT.delete(nodeId);
         }
@@ -3620,7 +3647,7 @@ Requirements:
         // Get content if available
         let content = "";
         if (LEVELS_ENABLED.has(nodeId)) {
-          const activeLevel = ACTIVE_LEVEL.get(nodeId) || 5;
+          const activeLevel = ACTIVE_LEVEL.get(nodeId) || 1;
           content = LEVEL_CONTENT.get(nodeId)?.get(activeLevel) || "";
         } else {
           content = CONTENT.get(nodeId) || "";
@@ -3687,7 +3714,7 @@ Requirements:
         // Get content for visualization
         let content = "";
         if (LEVELS_ENABLED.has(nodeId)) {
-          const activeLevel = ACTIVE_LEVEL.get(nodeId) || 5;
+          const activeLevel = ACTIVE_LEVEL.get(nodeId) || 1;
           content = LEVEL_CONTENT.get(nodeId)?.get(activeLevel) || "";
         } else {
           content = CONTENT.get(nodeId) || "";
@@ -4061,7 +4088,7 @@ Requirements:
       // Explanation content (if any)
       if (LEVELS_ENABLED.has(node.id)) {
         // Levels mode: show tabs and level content
-        const activeLevel = ACTIVE_LEVEL.get(node.id) || 5;
+        const activeLevel = ACTIVE_LEVEL.get(node.id) || 1;
         
         // Create tabs container
         const tabsContainer = document.createElement("div");
@@ -4133,7 +4160,7 @@ Requirements:
         const chatContainer = document.createElement("div");
         chatContainer.className = "chat-container";
         // Create chat header with level information
-        const levelInfo = LEVELS_ENABLED.has(node.id) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(node.id) || 5)})` : "";
+  const levelInfo = LEVELS_ENABLED.has(node.id) ? ` (${getLevelLabel(ACTIVE_LEVEL.get(node.id) || 1)})` : "";
         chatContainer.innerHTML = `
           <div class="chat-header">Ask questions about "${node.title}"${levelInfo}</div>
           <div class="chat-messages" id="chat-messages-${node.id}"></div>
@@ -4248,14 +4275,14 @@ Requirements:
           // Use level-specific content if levels are enabled, otherwise use regular content
           let context = "(no content)";
           if (LEVELS_ENABLED.has(node.id)) {
-            const activeLevel = ACTIVE_LEVEL.get(node.id) || 5;
+            const activeLevel = ACTIVE_LEVEL.get(node.id) || 1;
             context = LEVEL_CONTENT.get(node.id)?.get(activeLevel) || `${getLevelLabel(activeLevel)} explanation not loaded`;
           } else {
             context = CONTENT.get(node.id) || "(no content)";
           }
 
           // Include level information in chat request
-          const level = LEVELS_ENABLED.has(node.id) ? (ACTIVE_LEVEL.get(node.id) || 5) : null;
+          const level = LEVELS_ENABLED.has(node.id) ? (ACTIVE_LEVEL.get(node.id) || 1) : null;
           
           const resp = await fetch("/api/chat", {
               method: "POST",
@@ -4585,11 +4612,11 @@ Requirements:
         // keep your mock as-is
         const mock = `Summary of "${node.title}":\n• ...\n\n$$\\int_0^1 x^2 dx = 1/3$$`;
         if (LEVELS_ENABLED.has(node.id)) {
-          // In levels mode, add to level 5
+          // In levels mode, add to level 1 (Beginner)
           if (!LEVEL_CONTENT.has(node.id)) {
             LEVEL_CONTENT.set(node.id, new Map());
           }
-          LEVEL_CONTENT.get(node.id).set(5, mock);
+          LEVEL_CONTENT.get(node.id).set(1, mock);
         } else {
         CONTENT.set(node.id, mock);
         }
@@ -4610,7 +4637,7 @@ Requirements:
 
       // If levels are enabled, load the current active level only if not already cached
       if (LEVELS_ENABLED.has(node.id)) {
-        const activeLevel = ACTIVE_LEVEL.get(node.id) || 5;
+        const activeLevel = ACTIVE_LEVEL.get(node.id) || 1;
         if (LEVEL_CONTENT.get(node.id)?.has(activeLevel)) {
           // Content already loaded for this level — just render
           if (NAV_MODE === 'leftnav') {
@@ -4732,6 +4759,23 @@ Requirements:
           result = await resp.json();
         }
         CURRENT_TOC = result.toc || [];
+        // Enable Levels UI by default for all sections and set active level to Beginner (1)
+        function enableLevelsForAll(nodes) {
+          for (const n of (nodes || [])) {
+            try {
+              LEVELS_ENABLED.add(n.id);
+              ACTIVE_LEVEL.set(n.id, 1);
+              if (!LEVEL_CONTENT.has(n.id)) LEVEL_CONTENT.set(n.id, new Map());
+              // If we already have main CONTENT for this node, seed level 1 with it
+              if (CONTENT.has(n.id) && !LEVEL_CONTENT.get(n.id).has(1)) {
+                LEVEL_CONTENT.get(n.id).set(1, CONTENT.get(n.id));
+                CONTENT.delete(n.id);
+              }
+              if (n.children && n.children.length) enableLevelsForAll(n.children);
+            } catch (e) { /* ignore individual node failures */ }
+          }
+        }
+        enableLevelsForAll(CURRENT_TOC);
         // Note: do NOT insert a top-level "Foundations" node into the TOC here.
         // Foundations is available via the dedicated button and is intentionally
         // not included as a persistent TOC item.

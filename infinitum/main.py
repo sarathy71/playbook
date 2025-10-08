@@ -563,10 +563,10 @@ Requirements:
     try:
         if toc and len(toc) > 0:
             first = toc[0]
-            # Build a lightweight read prompt similar to /api/read (defaults to level 5)
-            level = 5
+            # Build a lightweight read prompt similar to /api/read (defaults to Beginner / level 1)
+            level = 1
             level_descriptions = {
-                5: "Explain for an informed learner: comprehensive overview with good balance of intuition and technical details, standard terminology."
+                1: "Explain for a beginner: simple analogies, everyday examples, avoid jargon."
             }
             level_instruction = level_descriptions.get(level, "")
 
@@ -623,8 +623,8 @@ def api_foundations():
     node = body.get("node") or {}
     first = node or {}
 
-    level = 5
-    level_instruction = "Explain for an informed learner: comprehensive overview with good balance of intuition and technical details."
+    level = 1
+    level_instruction = "Explain for a beginner: simple analogies, everyday examples, avoid jargon."
     standard_user_prompt_read = f"""
 Write an exhaustive, structured "Foundations" guide that lists the *necessary prerequisite topics* a learner must master to thoroughly understand the selected outline item. Produce the output in Markdown (headings, short paragraphs, and bullet lists) suitable as a study checklist and teaching scaffold.
 
@@ -740,7 +740,7 @@ def api_read():
     sections = int(body.get("sections", 5))
     model = body.get("model", "gpt-4.1-mini")
     temperature = float(body.get("temperature", 0.3))
-    level = int(body.get("level", 5))  # Default to level 5 if not specified
+    level = int(body.get("level", 1))  # Default to level 1 (Beginner) if not specified
     if not topic or not node:
         abort(400, "Missing topic or node.")
 
@@ -758,7 +758,7 @@ def api_read():
         10: "Explain at maximum expertise level: complete formalism, rigorous proofs, advanced mathematics, research-level precision."
     }
     
-    level_instruction = level_descriptions.get(level, level_descriptions[5])
+    level_instruction = level_descriptions.get(level, level_descriptions[1])
 
     # Replace the per-case prompts with a single exhaustive-study prompt for read requests.
     standard_user_prompt = f"""
