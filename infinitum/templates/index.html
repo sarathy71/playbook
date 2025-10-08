@@ -3371,10 +3371,10 @@ Requirements:
         }
       }
 
-      // Show non-blocking toast immediately
-      const raw = selectionInfo.text || '';
-      const short = raw.length > 10 ? raw.slice(0, 10) + '...' : raw;
-      showToast(`Generating deep dive for ${short}`, 'success', 2000);
+  // Show non-blocking toast immediately
+  const raw = selectionInfo.text || '';
+  const short = raw.length > 50 ? raw.slice(0, 50) + '...' : raw;
+  showToast(`Generating deep dive for ${short}`, 'success', 2000);
       hideSelectionToolbar();
 
       // Run the deep-dive work asynchronously in background so the UI is not blocked
@@ -3386,30 +3386,66 @@ Requirements:
           const temperature = parseFloat($("inpTemp").value || "0.3");
           const path = getNodePath(nodeId);
 
+          // If deep-dive-with-context is NOT enabled for this node, avoid
+          // passing parent-topic/path to the server to encourage an
+          // independent deep-dive. We still include the with_context flag
+          // (false) so the server can adapt; additionally we sanitize
+          // returned content to remove accidental parent-topic mentions.
+          const includeContext = DEEP_WITH_CONTEXT.has(node.id);
+          // If context is not included, send the selection text as a minimal
+          // topic so server validation (which requires a non-empty topic) passes.
+          let topicForRequest = includeContext ? topic : ((selectionInfo.text || '').slice(0, 200));
+          if (!topicForRequest || !String(topicForRequest).trim()) topicForRequest = 'independent';
+          const pathForRequest = includeContext ? path : [];
+
+          // Sanitizer to remove parent-topic mentions when independence is desired
+          function sanitizeParentMentions(text) {
+            try {
+              if (!text || includeContext) return text || '';
+              const parent = topic || '';
+              if (!parent) return text || '';
+              const esc = parent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              return String(text).replace(new RegExp(esc, 'ig'), '').trim();
+            } catch (e) { return text || ''; }
+          }
+
+          // Always include the source node id so server validation succeeds.
+          // When not including context, we omit the node title (or set it to the
+          // selection snippet) to avoid biasing the deep-dive, but the id helps
+          // server-side bookkeeping and prevents 400 errors complaining about
+          // missing node.
+          const nodeForRequest = includeContext ? { id: node.id, title: node.title } : { id: node.id, title: (selectionInfo.text || '').slice(0, 200) };
+          const payload = {
+            topic: topicForRequest,
+            audience,
+            model,
+            temperature,
+            node: nodeForRequest,
+            path: pathForRequest,
+            with_context: includeContext,
+            selection: {
+              text: selectionInfo.text,
+              sourceNodeId: nodeId,
+              snippet: selectionInfo.snippet
+            }
+          };
+          console.debug('deepdive payload', payload);
           const resp = await fetch("/api/deepdive", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              topic,
-              audience,
-              model,
-              temperature,
-              node: { id: node.id, title: node.title },
-              path,
-              with_context: DEEP_WITH_CONTEXT.has(node.id),
-              selection: {
-                text: selectionInfo.text,
-                sourceNodeId: nodeId,
-                snippet: selectionInfo.snippet
-              }
-            })
+            body: JSON.stringify(payload)
           });
 
           if (!resp.ok) throw new Error(await resp.text());
           const data = await resp.json();
-          const shortName = data.shortName;
-          const wrapperDescription = data.wrapperDescription;
-          const children = data.children || [];
+          // Sanitize server returned names/descriptions/content when independence requested
+          const shortName = sanitizeParentMentions(data.shortName || 'Deep Dive');
+          const wrapperDescription = sanitizeParentMentions(data.wrapperDescription || '');
+          const children = (data.children || []).map((c) => ({
+            title: sanitizeParentMentions(c.title || ''),
+            description: sanitizeParentMentions(c.description || ''),
+            readContent: sanitizeParentMentions(c.readContent || '')
+          }));
 
           if (!children.length) {
             showToast("Couldn't identify subtopics from the selection.", 'error', 4000);
@@ -3473,20 +3509,38 @@ Requirements:
             try {
               const depth = parseInt($("inpDepth").value || "3", 10);
               const sections = parseInt($("inpSections").value || "5", 10);
+              // Request read content using context only when includeContext is true
               const respRead = await fetch("/api/read", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ topic, audience, model, temperature, node: { id: overviewId, title: wrapper.title }, path, depth, sections, level: 5 })
+                body: JSON.stringify({ topic: topicForRequest, audience, model, temperature, node: includeContext ? { id: overviewId, title: wrapper.title } : { id: overviewId, title: wrapper.title }, path: includeContext ? pathForRequest : [], depth, sections, level: 5 })
               });
               if (respRead.ok) {
                 const rdr = await respRead.json();
-                readOverviewContent = rdr.content || '';
+                readOverviewContent = sanitizeParentMentions(rdr.content || '');
               }
             } catch (e) {
               readOverviewContent = wrapper.description || '';
             }
 
             let finalComposed = `# ${wrapper.title}\n\n` + (readOverviewContent || wrapper.description || '') + '\n\n' + detailed;
+            // If independence requested, append a short client-generated Relevance section
+            // that connects the deep-dive back to the parent topic without biasing
+            // the main content. This avoids an extra server call while providing
+            // a clear bridge to the original topic.
+            if (!includeContext && topic) {
+              try {
+                const selSnippet = (selectionInfo.snippet || selectionInfo.text || '').replace(/\s+/g, ' ').trim();
+                const smallSnippet = selSnippet.length > 80 ? selSnippet.slice(0,80) + '...' : selSnippet;
+                const relevance = `## Relevance in ${escapeHtml(topic)}\n\n` +
+                  `This section briefly explains how **${escapeHtml(smallSnippet)}** connects to **${escapeHtml(topic)}**. ` +
+                  `The deep dive above treats the selected item as an independent subject; this paragraph highlights its relationship to the larger topic.`;
+                finalComposed += '\n\n' + relevance + '\n\n';
+              } catch (e) { /* swallow */ }
+            }
+
+            // Sanitize final composed content if independence requested
+            finalComposed = includeContext ? finalComposed : sanitizeParentMentions(finalComposed);
             CONTENT.set(overviewId, normalizeMathDelimiters(finalComposed));
             if (!CHAT_HISTORY.has(overviewId)) CHAT_HISTORY.set(overviewId, []);
             CHAT_HISTORY.get(overviewId).push({ role: 'system', content: `Overview created from selection: "${selectionInfo.snippet}"`, ts: new Date().toISOString() });
