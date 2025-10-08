@@ -1698,6 +1698,62 @@ Requirements:
       } catch (e) { console.error('showToast failed', e); }
     }
 
+    // Clickable toast helper: shows a toast that can call `onClick` when clicked.
+    // Used to notify user when a background deep-dive is ready and allow them
+    // to jump directly to the created deep-dive section.
+    function showClickableToast(message, onClick, timeout = 5000, type = 'success') {
+      try {
+        const container = $('toastContainer');
+        if (!container) return;
+        const t = document.createElement('div');
+        t.className = `toast ${type === 'error' ? 'error' : 'success'}`;
+        t.textContent = message;
+        t.style.cursor = onClick ? 'pointer' : 'default';
+        if (onClick) {
+          t.addEventListener('click', (e) => {
+            try { onClick(e); } catch (err) { console.error('toast click handler error', err); }
+            // remove immediately after click
+            t.classList.remove('show');
+            setTimeout(() => t.remove(), 200);
+          });
+        }
+        container.appendChild(t);
+        // animate in
+        setTimeout(() => t.classList.add('show'), 10);
+        // auto-dismiss
+        setTimeout(() => {
+          t.classList.remove('show');
+          setTimeout(() => t.remove(), 300);
+        }, timeout);
+      } catch (e) { console.error('showClickableToast failed', e); }
+    }
+
+    // Helper to open/select a deep-dive wrapper node and scroll it into view.
+    function openDeepDive(wrapperId) {
+      try {
+        if (!wrapperId) return;
+        // Ensure parents expanded
+        const parts = wrapperId.split('/');
+        let acc = parts[0];
+        for (let i = 1; i < parts.length; i++) {
+          acc = acc + '/' + parts[i];
+          EXPANDED.add(acc);
+        }
+        // Render tree and select wrapper
+        if (NAV_MODE === 'leftnav') {
+          renderLeftNavTree();
+          selectNodeInLeftNav(wrapperId);
+        } else {
+          renderTree(CURRENT_TOC);
+          // If there is a UI element for the node, select it by data attribute
+          const el = document.querySelector(`[data-node-id="${CSS.escape(wrapperId)}"]`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }
+      } catch (e) { console.warn('openDeepDive failed', e); }
+    }
+
     // Flash Save button: 'success' (green), 'error' (red), 'pending' (neutral)
     function flashSaveButton(state) {
       const btn = document.getElementById('btnSave');
@@ -3294,325 +3350,176 @@ Requirements:
       return labels[level] || `Level ${level}`;
     }
 
-    async function diveDeep() {
+    function diveDeep() {
       const diveBtn = document.getElementById('btnDiveDeep');
       if (!currentSelection) return;
-      // Indicate loading/active state and show global spinner overlay
-      if (diveBtn) { diveBtn.classList.add('loading'); diveBtn.disabled = true; }
-      showGlobalSpinner();
-      
+
       const selectionInfo = currentSelection;
       const nodeId = selectionInfo.nodeId;
       const node = findNodeById(CURRENT_TOC, nodeId);
       if (!node) return;
 
-      // If this selection is already a deep-mark pointing to an existing wrapper, navigate to it
+      // If selection already has a deep mark, navigate to it immediately
       if (selectionInfo.deepId) {
-        // Find deep mark meta
         for (const [nId, list] of DEEP_MARKS) {
           const dm = list.find(d => d.id === selectionInfo.deepId);
           if (dm && dm.wrapperId) {
-            // Find wrapper node and select its overview child if present
-            const wrapperNode = findNodeById(CURRENT_TOC, dm.wrapperId);
-            if (wrapperNode && wrapperNode.children && wrapperNode.children.length > 0) {
-              // Ensure parents expanded and select the first child overview
-              EXPANDED.add(dm.wrapperId);
-              if (NAV_MODE === 'leftnav') {
-                renderLeftNavTree();
-                selectNodeInLeftNav(wrapperNode.children[0].id);
-              } else {
-                renderTree(CURRENT_TOC);
-              }
-              hideSelectionToolbar();
-              if (diveBtn) { diveBtn.classList.remove('loading'); diveBtn.disabled = false; }
-              hideGlobalSpinner();
-              return;
-            }
+            openDeepDive(dm.wrapperId);
+            hideSelectionToolbar();
+            return;
           }
         }
       }
 
-  // Deep dive confirmed - proceed directly
+      // Show non-blocking toast immediately
+      const raw = selectionInfo.text || '';
+      const short = raw.length > 10 ? raw.slice(0, 10) + '...' : raw;
+      showToast(`Generating deep dive for ${short}`, 'success', 2000);
+      hideSelectionToolbar();
 
-      try {
-        const topic = $("inpTopic").value.trim();
-        const audience = $("inpAudience").value.trim() || "general";
-        const model = $("selModel").value;
-        const temperature = parseFloat($("inpTemp").value || "0.3");
-        const path = getNodePath(nodeId);
-
-        const resp = await fetch("/api/deepdive", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            topic,
-            audience,
-            model,
-            temperature,
-            node: { id: node.id, title: node.title },
-            path,
-            with_context: DEEP_WITH_CONTEXT.has(node.id),
-            selection: {
-              text: selectionInfo.text,
-              sourceNodeId: nodeId,
-              snippet: selectionInfo.snippet
-            }
-          })
-        });
-
-        if (!resp.ok) throw new Error(await resp.text());
-        const data = await resp.json();
-        const shortName = data.shortName;
-        const wrapperDescription = data.wrapperDescription;
-        const children = data.children || [];
-
-        if (children.length === 0) {
-          alert("Couldn't identify subtopics from the selection. Try selecting a more specific concept or phrase.");
-          hideSelectionToolbar();
-          return;
-        }
-
-        // Create wrapper node
-        const wrapperId = `${nodeId}/${slug(shortName)}`;
-        const wrapper = {
-          id: wrapperId,
-          title: shortName,
-          description: wrapperDescription,
-          children: children.map((child, index) => ({
-            id: `${wrapperId}/${slug(child.title || `child-${index}`)}`,
-            title: child.title,
-            description: child.description,
-            readContent: child.readContent
-          }))
-        };
-
-        // Ensure unique wrapper ID
-        let finalWrapperId = wrapperId;
-        let counter = 2;
-        while (node.children?.some(child => child.id === finalWrapperId)) {
-          finalWrapperId = `${nodeId}/${slug(shortName)}-${counter}`;
-          counter++;
-        }
-        wrapper.id = finalWrapperId;
-        wrapper.children = wrapper.children.map(child => ({
-          ...child,
-          id: child.id.replace(wrapperId, finalWrapperId)
-        }));
-
-        // Remove any automatic "Overview" child from deep-dive children —
-        // the wrapper itself will contain the overview content.
-        wrapper.children = (wrapper.children || []).filter(c => {
-          try {
-            return !/\boverview\b/i.test(String(c.title || ''));
-          } catch (e) {
-            return true;
-          }
-        });
-
-        // Prepend a Foundations child so the deep-dive wrapper always exposes
-        // prerequisite background as the first child. The click handler will
-        // call /api/foundations when this child is clicked (client-side logic
-        // treats any node id that ends with '/foundations' specially).
+      // Run the deep-dive work asynchronously in background so the UI is not blocked
+      (async () => {
         try {
-          const foundationsChildId = `${wrapper.id}/foundations`;
-          // Avoid duplicates
-          if (!wrapper.children.some(c => c.id === foundationsChildId)) {
-            const foundationsChild = {
-              id: foundationsChildId,
-              title: 'Foundations',
-              description: 'Prerequisite background and foundational concepts.'
-            };
-            wrapper.children.unshift(foundationsChild);
-          }
-        } catch (e) {
-          console.warn('Failed to prepend Foundations child to deep-dive wrapper:', e);
-        }
+          const topic = $("inpTopic").value.trim();
+          const audience = $("inpAudience").value.trim() || "general";
+          const model = $("selModel").value;
+          const temperature = parseFloat($("inpTemp").value || "0.3");
+          const path = getNodePath(nodeId);
 
-        // Create undo snapshot
-        const undoSnapshot = {
-          type: 'add-children',
-          parentId: nodeId,
-          childrenIds: [wrapper.id, ...wrapper.children.map(c => c.id)],
-          timestamp: new Date().toISOString()
-        };
-        UNDO_STACK.push(undoSnapshot);
-        updateUndoButton();
-
-        // Add wrapper to the node
-        if (!node.children) node.children = [];
-        node.children.push(wrapper);
-
-        // Update expansion cache
-        EXP_CACHE.set(nodeId, node.children);
-        EXP_CACHE.set(wrapper.id, wrapper.children);
-
-        // Add to expanded set: parent and wrapper. The wrapper node itself will hold the overview content
-        EXPANDED.add(nodeId);
-        EXPANDED.add(wrapper.id);
-
-        // Compose overview content directly on the wrapper node (no separate Overview child)
-        try {
-          // Build detailed child sections first
-          let detailed = '';
-          for (const child of wrapper.children) {
-            const title = child.title || '';
-            const desc = child.description || '';
-            const rawContent = child.readContent || '';
-            const normalized = normalizeMathDelimiters(rawContent || desc || '');
-            detailed += `## ${title}\n\n${normalized}\n\n`;
-          }
-
-          const overviewId = wrapper.id; // use wrapper id for overview content
-
-          // Fetch a full, level-aware explanation for the overview via /api/read
-          // (prefer server's read endpoint instead of calling the summary endpoint)
-          let summary = '';
-          let readOverviewContent = '';
-          try {
-            const depth = parseInt($("inpDepth").value || "3", 10);
-            const sections = parseInt($("inpSections").value || "5", 10);
-            const respRead = await fetch("/api/read", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                topic,
-                audience,
-                model,
-                temperature,
-                node: { id: overviewId, title: wrapper.title },
-                path,
-                depth,
-                sections,
-                level: 5
-              })
-            });
-            if (!respRead.ok) throw new Error(await respRead.text());
-            const rdr = await respRead.json();
-            readOverviewContent = rdr.content || '';
-          } catch (e) {
-            console.warn('Read generation for deep-dive overview failed:', e);
-            readOverviewContent = wrapper.description || '';
-          }
-
-          // Prefer server-provided Overview content. If the server returned a
-          // concise `summary` field, use it for UI summary boxes. Do not
-          // synthesize key topics or examples on the client; those are
-          // redundant and better controlled via server prompts.
-          let finalComposed = `# ${wrapper.title}\n\n`;
-          if (readOverviewContent) {
-            finalComposed += `${readOverviewContent}\n\n`;
-          } else if (summary) {
-            finalComposed += `${summary}\n\n`;
-          } else if (wrapper.description) {
-            finalComposed += `${wrapper.description}\n\n`;
-          }
-          finalComposed += detailed;
-
-          // Normalize math delimiters and save composed content as the wrapper's full content
-          const normalizedFinalComposed = normalizeMathDelimiters(finalComposed);
-          CONTENT.set(overviewId, normalizedFinalComposed);
-
-          // Store summary for UI (summary box) if available
-          if (summary) SUMMARIES.set(overviewId, summary);
-
-          // Initialize chat history for wrapper overview with a system message
-          if (!CHAT_HISTORY.has(overviewId)) {
-            CHAT_HISTORY.set(overviewId, []);
-          }
-          CHAT_HISTORY.get(overviewId).push({
-            role: 'system',
-            content: `Overview created from selection: "${selectionInfo.snippet}"`,
-            ts: new Date().toISOString()
+          const resp = await fetch("/api/deepdive", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              topic,
+              audience,
+              model,
+              temperature,
+              node: { id: node.id, title: node.title },
+              path,
+              with_context: DEEP_WITH_CONTEXT.has(node.id),
+              selection: {
+                text: selectionInfo.text,
+                sourceNodeId: nodeId,
+                snippet: selectionInfo.snippet
+              }
+            })
           });
 
-          // Check visualization eligibility for the wrapper overview
-          try { checkVisualizationEligibility(overviewId); } catch (e) { /* ignore */ }
+          if (!resp.ok) throw new Error(await resp.text());
+          const data = await resp.json();
+          const shortName = data.shortName;
+          const wrapperDescription = data.wrapperDescription;
+          const children = data.children || [];
 
-          autosave();
-        } catch (e) {
-          console.error('Failed to set deep dive overview content on wrapper:', e);
-        }
-
-        // Track deep dive event (overview lives on the wrapper node now)
-        DEEP_DIVES.push({
-          nodeId,
-          wrapperId: wrapper.id,
-          shortName,
-          overviewChildId: wrapper.id,
-          selection: {
-            text: selectionInfo.text,
-            snippet: selectionInfo.snippet
-          },
-          createdAt: new Date().toISOString(),
-          newChildIds: [wrapper.id, ...wrapper.children.map(c => c.id)]
-        });
-
-        // Create a deep-mark span in the source node pointing to this wrapper
-        try {
-          const dm = createDeepMarkFromSelection(wrapper.id);
-          if (dm) {
-            // attach deep mark id to the DEEP_DIVES entry for convenience
-            DEEP_DIVES[DEEP_DIVES.length - 1].deepMarkId = dm.id;
+          if (!children.length) {
+            showToast("Couldn't identify subtopics from the selection.", 'error', 4000);
+            return;
           }
-        } catch (e) {
-          console.warn('Failed to create deep mark for selection:', e);
-        }
 
-        // Re-render and scroll to Overview
-        if (NAV_MODE === 'leftnav') {
-          renderLeftNavTree();
-          // Auto-select the wrapper (which now contains the overview content)
-          selectNodeInLeftNav(wrapper.id);
-        } else {
-          if (NAV_MODE === 'leftnav') {
-          renderLeftNavTree();
-        } else {
-          if (NAV_MODE === 'leftnav') {
-  renderLeftNavTree();
-} else {
-  renderTree(CURRENT_TOC);
-}
-        }
-        // Ensure math is typeset for the newly inserted overview content.
-        // Run a slightly delayed typeset so the DOM has fully updated.
-        setTimeout(() => {
+          // Build wrapper (same logic as before)
+          const wrapperIdBase = `${nodeId}/${slug(shortName)}`;
+          const wrapper = {
+            id: wrapperIdBase,
+            title: shortName,
+            description: wrapperDescription,
+            children: children.map((child, index) => ({
+              id: `${wrapperIdBase}/${slug(child.title || `child-${index}`)}`,
+              title: child.title,
+              description: child.description,
+              readContent: child.readContent
+            }))
+          };
+
+          // Ensure unique wrapper id
+          let finalWrapperId = wrapper.id;
+          let counter = 2;
+          while (node.children?.some(child => child.id === finalWrapperId)) {
+            finalWrapperId = `${nodeId}/${slug(shortName)}-${counter}`;
+            counter++;
+          }
+          wrapper.id = finalWrapperId;
+          wrapper.children = wrapper.children.map(c => ({ ...c, id: c.id.replace(wrapperIdBase, finalWrapperId) }));
+
+          // Filter out automatic "Overview" children
+          wrapper.children = (wrapper.children || []).filter(c => { try { return !/\boverview\b/i.test(String(c.title || '')); } catch (e) { return true; } });
+
+          // Prepend foundations child
           try {
-            const readbox = document.querySelector('.selected-node-content .readbox');
-            if (readbox) {
-              typesetMath(readbox).then(() => emitContentRendered(wrapper.id)).catch(() => emitContentRendered(wrapper.id));
-            } else {
-              typesetMath().then(() => emitContentRendered(wrapper.id)).catch(() => emitContentRendered(wrapper.id));
+            const foundationsChildId = `${wrapper.id}/foundations`;
+            if (!wrapper.children.some(c => c.id === foundationsChildId)) {
+              wrapper.children.unshift({ id: foundationsChildId, title: 'Foundations', description: 'Prerequisite background and foundational concepts.' });
             }
-          } catch (e) {
-            try { emitContentRendered(wrapper.id); } catch (_) {}
+          } catch (e) { /* ignore */ }
+
+          // Add wrapper to tree and caches
+          if (!node.children) node.children = [];
+          node.children.push(wrapper);
+          EXP_CACHE.set(nodeId, node.children);
+          EXP_CACHE.set(wrapper.id, wrapper.children);
+          EXPANDED.add(nodeId);
+          EXPANDED.add(wrapper.id);
+
+          // Compose overview content and stash into CONTENT (best-effort)
+          try {
+            let detailed = '';
+            for (const child of wrapper.children) {
+              const title = child.title || '';
+              const rawContent = child.readContent || child.description || '';
+              detailed += `## ${title}\n\n${normalizeMathDelimiters(rawContent)}\n\n`;
+            }
+
+            const overviewId = wrapper.id;
+            let readOverviewContent = '';
+            try {
+              const depth = parseInt($("inpDepth").value || "3", 10);
+              const sections = parseInt($("inpSections").value || "5", 10);
+              const respRead = await fetch("/api/read", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ topic, audience, model, temperature, node: { id: overviewId, title: wrapper.title }, path, depth, sections, level: 5 })
+              });
+              if (respRead.ok) {
+                const rdr = await respRead.json();
+                readOverviewContent = rdr.content || '';
+              }
+            } catch (e) {
+              readOverviewContent = wrapper.description || '';
+            }
+
+            let finalComposed = `# ${wrapper.title}\n\n` + (readOverviewContent || wrapper.description || '') + '\n\n' + detailed;
+            CONTENT.set(overviewId, normalizeMathDelimiters(finalComposed));
+            if (!CHAT_HISTORY.has(overviewId)) CHAT_HISTORY.set(overviewId, []);
+            CHAT_HISTORY.get(overviewId).push({ role: 'system', content: `Overview created from selection: "${selectionInfo.snippet}"`, ts: new Date().toISOString() });
+            checkVisualizationEligibility(overviewId);
+            autosave();
+          } catch (e) { console.warn('Failed to compose overview content:', e); }
+
+          // Track deep dive
+          DEEP_DIVES.push({ nodeId, wrapperId: wrapper.id, shortName, overviewChildId: wrapper.id, selection: { text: selectionInfo.text, snippet: selectionInfo.snippet }, createdAt: new Date().toISOString(), newChildIds: [wrapper.id, ...wrapper.children.map(c => c.id)] });
+
+          // Create deep mark from selection (best-effort)
+          try {
+            const prev = currentSelection;
+            try { currentSelection = selectionInfo; createDeepMarkFromSelection(wrapper.id); } finally { currentSelection = prev; }
+            try { applyDeepMarksForNode(node.id); } catch (e) {}
+          } catch (e) { console.warn('Failed to create deep mark:', e); }
+
+          // Re-render UI (do not block user)
+          if (NAV_MODE === 'leftnav') {
+            renderLeftNavTree();
+          } else {
+            renderTree(CURRENT_TOC);
           }
-        }, 80);
+
+          // Show clickable toast that navigates to the deep dive when clicked
+          const clickMsg = `Deep Dive is ready for ${short}. Click here`;
+          showClickableToast(clickMsg, () => openDeepDive(wrapper.id), 5000, 'success');
+
+        } catch (e) {
+          console.error('Background deep dive failed:', e);
+          showToast('Deep dive failed: ' + (e.message || String(e)), 'error', 5000);
         }
-        renderBreadcrumb();
-        
-        // Scroll to and highlight the wrapper (which shows the overview content)
-        setTimeout(() => {
-          const wrapperElement = document.querySelector(`[data-node-id="${wrapper.id}"]`);
-          if (wrapperElement) {
-            wrapperElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            wrapperElement.style.transition = 'background-color 0.3s ease';
-            wrapperElement.style.backgroundColor = '#e3f2fd';
-            setTimeout(() => { wrapperElement.style.backgroundColor = ''; }, 2000);
-          }
-        }, 100);
-
-        autosave();
-        hideSelectionToolbar();
-
-      } catch (e) {
-        console.error("Deep dive failed:", e);
-        showError(`Deep dive failed: ${e.message}`);
-        hideSelectionToolbar();
-      } finally {
-        if (diveBtn) { diveBtn.classList.remove('loading'); diveBtn.disabled = false; }
-        // Ensure spinner is always hidden after operation completes
-        hideGlobalSpinner();
-      }
+      })();
     }
 
     // Show/hide helpers for the global spinner overlay
