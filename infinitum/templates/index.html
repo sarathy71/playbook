@@ -3789,42 +3789,15 @@ Requirements:
     }
     
     // ----------------------- Summary Functions -----------------------
+    // Summary generation is intentionally disabled in the client to avoid
+    // additional network/cold-start latency during TOC/read flows. This stub
+    // returns immediately and keeps the SUMMARIES map available for persisted
+    // notebooks or any future server-driven summaries.
     async function generateSummary(nodeId, content) {
-      if (SUMMARIES.has(nodeId)) {
-        return SUMMARIES.get(nodeId);
-      }
-      
-      try {
-        const topic = $("inpTopic").value.trim();
-        const audience = $("inpAudience").value.trim() || "general";
-        const model = $("selModel").value;
-        const temperature = parseFloat($("inpTemp").value || "0.3");
-        const path = getNodePath(nodeId);
-        
-        const resp = await fetch("/api/summary", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            topic,
-            audience,
-            model,
-            temperature,
-            node: { id: nodeId, title: findNodeById(CURRENT_TOC, nodeId)?.title || "" },
-            path,
-            content
-          })
-        });
-        
-        if (!resp.ok) throw new Error(await resp.text());
-        const data = await resp.json();
-        
-        SUMMARIES.set(nodeId, data.summary);
-        return data.summary;
-        
-      } catch (e) {
-        console.error("Summary generation failed:", e);
-        return "Summary generation failed. Please try again.";
-      }
+      // If we already have a stored summary (from a saved notebook), return it.
+      if (SUMMARIES.has(nodeId)) return SUMMARIES.get(nodeId);
+      // Otherwise, return an empty summary quickly — do not call the server.
+      return "";
     }
 
     
@@ -4365,11 +4338,10 @@ Requirements:
       // delimiters are consistent for the Markdown renderer and MathJax.
       try {
         (children || []).forEach((child) => {
-          if (child && child.readContent) {
+            if (child && child.readContent) {
             const normalized = normalizeMathDelimiters(child.readContent);
             CONTENT.set(child.id, normalized);
-            // Best-effort: generate a summary in background for faster UI
-            generateSummary(child.id, normalized).then((s) => { if (s) SUMMARIES.set(child.id, s); autosave(); }).catch(() => {});
+            // Do not generate summary here to avoid delaying UI; skip background summary generation
           }
         });
       } catch (e) {
@@ -4547,7 +4519,7 @@ Requirements:
           try {
             const normalized = normalizeMathDelimiters(child.readContent || '');
             CONTENT.set(child.id, normalized);
-            generateSummary(child.id, normalized).then((s) => { if (s) SUMMARIES.set(child.id, s); autosave(); }).catch(() => {});
+            // Skip generating a summary here to prioritize faster rendering
           } catch (e) {
             console.warn('Failed to normalize/stash top-level Foundations readContent', e);
           }
@@ -4688,12 +4660,8 @@ Requirements:
         const data = await resp.json();
         const fullContent = data.content || "No content returned.";
         
-        // Generate summary first
-        const summary = await generateSummary(node.id, fullContent);
-        
-        // Store both summary and full content
-        CONTENT.set(node.id, fullContent);
-        SUMMARIES.set(node.id, summary);
+  // Store full content immediately; do not block on generating a summary
+  CONTENT.set(node.id, fullContent);
         
         
         // Check visualization eligibility
@@ -4790,12 +4758,15 @@ Requirements:
         }
         if (NAV_MODE === 'leftnav') {
           renderLeftNavTree();
-          // Auto-select the first top-level chapter (not its first child) and read its content
+          // Auto-select a preferred chapter and read its content. Prefer the
+          // top-level chapter titled "Foundations Mapping" if present; otherwise
+          // fall back to the first top-level chapter.
           if (CURRENT_TOC.length > 0) {
-            const firstChapter = CURRENT_TOC[0];
+            const preferred = CURRENT_TOC.find(n => String(n.title || '').trim() === 'Foundations Mapping');
+            const firstChapter = preferred || CURRENT_TOC[0];
             if (firstChapter) {
               selectNodeInLeftNav(firstChapter.id);
-              // If server returned initial content for the first chapter, use it to populate UI
+              // If server returned initial content for the selected chapter, use it to populate UI
               if (result && result.firstContent) {
                 try {
                   // Normalize math delimiters early so MathJax and the Markdown renderer
@@ -4805,7 +4776,7 @@ Requirements:
                   const normalizedFirst = normalizeMathDelimiters(result.firstContent);
                   CONTENT.set(firstChapter.id, normalizedFirst);
                   // Generate summary asynchronously (best-effort)
-                  generateSummary(firstChapter.id, normalizedFirst).then((s) => { SUMMARIES.set(firstChapter.id, s); autosave(); }).catch(() => {});
+                  // Skip generating a summary for the first chapter to avoid delaying display
                 } catch (e) {
                   console.warn('Failed to apply firstContent from /api/toc:', e);
                 }
