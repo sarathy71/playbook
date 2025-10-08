@@ -33,10 +33,41 @@ app = Flask(__name__)
 
 SYSTEM_PROMPT = (
     "You are an expert curriculum designer and information architect. "
+    "Adopt a Conceptual & Intuition-First teaching style: start with a one-sentence core idea, "
+    "offer a short visual analogy or conceptual hook for major sections, and suggest a tiny active task or teach-back prompt where useful. "
     "Given a Topic and constraints, produce a clean, hierarchical table of contents. "
     "Focus on clarity, progressive depth, and coverage of the domain. Avoid fluff, "
     "keep titles concise, and add 1-sentence descriptions only when valuable."
 )
+
+# Keep both standard and intuitive system prompts so callers can pick a learning mode.
+STANDARD_SYSTEM_PROMPT = (
+    "You are an expert curriculum designer and information architect. "
+    "Given a Topic and constraints, produce a clean, hierarchical table of contents. "
+    "Focus on clarity, progressive depth, and coverage of the domain. Avoid fluff, "
+    "keep titles concise, and add 1-sentence descriptions only when valuable."
+)
+
+INTUITIVE_SYSTEM_PROMPT = SYSTEM_PROMPT
+
+
+def _get_learning_mode_from(body=None) -> str:
+    """Return 'standard' or 'intuitive' based on request body override or ENV INFITUM_LEARNING_MODE.
+    Priority: body['learningMode'] (if present) -> ENV -> default 'standard'."""
+    lm = os.getenv('INFITUM_LEARNING_MODE', 'standard') or 'standard'
+    try:
+        lm = lm.strip().lower()
+    except Exception:
+        lm = 'standard'
+    if body and isinstance(body, dict):
+        for key in ('learningMode', 'learning_mode', 'learningmode', 'mode'):
+            if key in body and isinstance(body.get(key), str):
+                return 'intuitive' if body.get(key).strip().lower() == 'intuitive' else 'standard'
+    return 'intuitive' if lm == 'intuitive' else 'standard'
+
+
+def _choose(standard_text: str, intuitive_text: str, body=None) -> str:
+    return intuitive_text if _get_learning_mode_from(body) == 'intuitive' else standard_text
 
 def _slug(s: str) -> str:
     import re
@@ -428,7 +459,24 @@ def api_toc():
     model = body.get("model", "gpt-4.1-mini")
     temperature = float(body.get("temperature", 0.3))
 
-    user_prompt = f"""
+    intuitive_user_prompt = f"""
+Topic: {topic}
+Audience: {audience}
+Desired depth/levels: {depth}
+Target sections per level (approx): {sections}
+
+Pedagogy: Use a Conceptual & Intuition-First style where possible: start with a one-sentence core idea for the topic, prefer short visual analogies or hooks for top-level sections, and suggest a tiny teach-back prompt or 1-line exercise when helpful.
+
+Requirements:
+- Return ONLY valid JSON matching the schema {{ toc: TocNode[] }}.
+- Each TocNode: {{ id: string (slug), title: string, description?: string, children?: TocNode[] }}
+- IDs must be unique, URL-safe slugs derived from titles (e.g., "neural-networks/activation-functions").
+- The tree should be reasonably balanced and non-redundant.
+- Include foundational -> intermediate -> advanced progression.
+- Prefer 3–7 top-level sections unless topic is very narrow.
+""".strip()
+
+    standard_user_prompt = f"""
 Topic: {topic}
 Audience: {audience}
 Desired depth/levels: {depth}
@@ -443,7 +491,8 @@ Requirements:
 - Prefer 3–7 top-level sections unless topic is very narrow.
 """.strip()
 
-    parsed, raw = _chat_json(model, temperature, SYSTEM_PROMPT, user_prompt)
+    user_prompt = _choose(standard_user_prompt, intuitive_user_prompt, body)
+    parsed, raw = _chat_json(model, temperature, _choose(STANDARD_SYSTEM_PROMPT, INTUITIVE_SYSTEM_PROMPT, body), user_prompt)
     toc = _ensure_ids(parsed.get("toc", []))
 
     # Best-effort: also fetch content for the first top-level node so the client
@@ -515,8 +564,7 @@ def api_foundations():
 
     level = 5
     level_instruction = "Explain for an informed learner: comprehensive overview with good balance of intuition and technical details."
-
-    user_prompt_read = f"""
+    standard_user_prompt_read = f"""
 Write an exhaustive, structured "Foundations" guide that lists the *necessary prerequisite topics* a learner must master to thoroughly understand the selected outline item. Produce the output in Markdown (headings, short paragraphs, and bullet lists) suitable as a study checklist and teaching scaffold.
 
 Global Topic: {topic}
@@ -538,11 +586,11 @@ Requirements & structure:
   1. A clear subheading (###) with a concise title (3–6 words).
   2. A focused overview (2–4 sentences) explaining *what* the prerequisite is and *why* it matters specifically for the current item.
   3. A "Key pointers" bullet list (3–5 actionable items), including:
-     - concrete concepts to master,
-     - minimal formulas or definitions to memorize,
-     - canonical examples to study,
-     - short practice tasks or exercises, and
-     - one concise recommended resource (textbook chapter title, keyword, or short URL phrase).
+       - concrete concepts to master,
+       - minimal formulas or definitions to memorize,
+       - canonical examples to study,
+       - short practice tasks or exercises, and
+       - one concise recommended resource (textbook chapter title, keyword, or short URL phrase).
 - After the prerequisite list include:
   - "Minimal skills checklist" (3–8 short bullets of concrete abilities a learner should have before proceeding).
   - "Suggested study order" (2–6 sequential steps to learn the prerequisites efficiently).
@@ -560,6 +608,10 @@ Example outline (format only):
 # Foundations for {first.get('title','')}
 Short summary...
 """.strip()
+
+    intuitive_user_prompt_read = standard_user_prompt_read + "\n\nPedagogy guidance:\n- Use a Conceptual & Intuition-First style: start the guide with one-sentence core idea and a short visual analogy that links the prerequisites to the current item.\n- For each prerequisite, where possible, include a 1-line \"teach-back\" prompt (e.g., \"Explain X in one sentence\" or \"Draw a quick sketch showing Y\") the learner can use to test understanding.\n- Prefer concrete examples and 1–2 micro-exercises that build intuition rather than rote memorization.\n"
+
+    user_prompt_read = _choose(standard_user_prompt_read, intuitive_user_prompt_read, body)
 
     try:
         content, raw = _chat_text(model, temperature,
@@ -585,7 +637,7 @@ def api_expand():
     if not topic or not node:
         abort(400, "Missing topic or node.")
 
-    user_prompt = f"""
+    standard_user_prompt = f"""
 You are expanding a selected node inside a topic outline.
 
 Global Topic: {topic}
@@ -605,7 +657,10 @@ TocNode = {{ id: string (slug), title: string, description?: string, children?: 
 - Keep titles concise; add short descriptions only when valuable.
 """.strip()
 
-    parsed, raw = _chat_json(model, temperature, SYSTEM_PROMPT, user_prompt)
+    intuitive_user_prompt = standard_user_prompt + "\n\nPedagogy guidance:\n- Use a Conceptual & Intuition-First approach: aim to include a one-sentence core idea or analogy for each sub-section where helpful.\n- For at least one child, include a short \"micro-exercise\" (1–2 sentence teach-back or quick mental experiment) that solidifies intuition.\n"
+
+    user_prompt = _choose(standard_user_prompt, intuitive_user_prompt, body)
+    parsed, raw = _chat_json(model, temperature, _choose(STANDARD_SYSTEM_PROMPT, INTUITIVE_SYSTEM_PROMPT, body), user_prompt)
     children = _ensure_ids(parsed.get("children", []), prefix=node.get("id", ""))
     return jsonify({"children": children, "model": raw.get("model"), "tokens": raw.get("usage")})
 
@@ -641,7 +696,7 @@ def api_read():
     level_instruction = level_descriptions.get(level, level_descriptions[5])
 
     # Replace the per-case prompts with a single exhaustive-study prompt for read requests.
-    user_prompt = f"""
+    standard_user_prompt = f"""
 Write an exhaustive, in-depth study of the selected outline item. Treat it as a comprehensive mini-chapter that explores the topic from all relevant angles — theory, context, methodology, examples, and implications. The goal is to provide a complete understanding suitable for independent study or teaching material.
 
 Global Topic: {topic}
@@ -664,6 +719,10 @@ Guidelines:
 - Write in a teaching tone: structured, logical, and progressively deep.
 - Do **not** return JSON; return only Markdown content.
 """.strip()
+
+    intuitive_user_prompt = standard_user_prompt + "\n\nPedagogy guidance:\n- Begin with a one-sentence \"core idea\" and a short visual analogy or conceptual hook that orients intuition.\n- Organize material in stepwise layers: conceptual foundations first, then mechanisms, then formal details and examples.\n- Where appropriate, include a small \"Try this\" teach-back: a 1–2 sentence prompt or micro-experiment the learner can do to test intuition (e.g., \"Predict what happens if X increases\") and a short expected outcome.\n- Favor clear diagrams/analogies and call them out explicitly in the text (textual descriptions are fine if visuals can't be rendered).\n"
+
+    user_prompt = _choose(standard_user_prompt, intuitive_user_prompt, body)
 
     content, raw = _chat_text(model, temperature,
                               "You explain concepts clearly with examples. Use Markdown and LaTeX for math.",
@@ -716,9 +775,8 @@ def api_chat():
 
     # Build a concise system instruction guiding the assistant to prefer the provided context
     system = (
-        "You are a helpful assistant. Use the provided context as the primary source when answering. "
-        "If the answer is not present in the context, be honest and provide brief, relevant guidance. "
-        "Use Markdown formatting and $...$ / $$...$$ for math when appropriate."
+        "You are a helpful assistant. Prefer a Conceptual & Intuition-First style: start answers with a one-sentence core idea, offer a short visual analogy when helpful, and include a 1-line teach-back prompt the user can use to check understanding. "
+        "Use the provided context as the primary source when answering. If the answer is not present in the context, be honest and provide brief, relevant guidance. Use Markdown formatting and $...$ / $$...$$ for math when appropriate."
     )
 
     messages = []
@@ -827,8 +885,8 @@ def api_deepdive():
         # Neutral/standalone prompt: do not mention global topic or breadcrumb
         system_prompt = (
             "You are an expert curriculum designer creating focused, standalone educational content. "
-            "Given a short text selection, produce 1-3 child sections that explain and deepen understanding "
-            "of that selection. Do NOT reference the parent topic, breadcrumb, or surrounding context."
+            "Adopt a Conceptual & Intuition-First style: in the Overview include a one-sentence core idea, a short analogy or visual hook, and a 1-line teach-back micro-exercise. "
+            "Given a short text selection, produce 1-3 child sections that explain and deepen understanding of that selection. Do NOT reference the parent topic, breadcrumb, or surrounding context."
         )
 
         user_prompt = f"""
@@ -871,6 +929,7 @@ Style guidelines:
         # Context-aware prompt: include topic and breadcrumb
         system_prompt = (
             "You are an expert curriculum designer creating focused, educational content. "
+            "Adopt a Conceptual & Intuition-First style: in the Overview include a one-sentence core idea, a short analogy or visual hook, and a 1-line teach-back micro-exercise. "
             "Given a text selection from a parent topic, create 1-3 child sections that meaningfully "
             "deepen understanding of the selected concept. Focus on clarity, progressive learning, "
             "and practical application."
@@ -964,12 +1023,12 @@ def api_quickdive():
     if not selection:
         abort(400, "Selection text is required for quick dive")
 
-    # Keep prompt concise and ask for 2-3 short paragraphs + key topics + example if useful
-    user_prompt = f"""
+    # Standard variant (previous behavior) — concise quick overview without explicit teach-back/pedagogy lines
+    standard_user_prompt = f"""
 You are an expert explainer. Given the following short selected text, produce a concise quick overview intended for a reader familiar with the surrounding topic.
 
 Selected text:
-""" + selection + """
+{selection}
 
 Requirements:
 - Provide a clear 2-3 paragraph overview (each paragraph short, easy to scan).
@@ -978,6 +1037,23 @@ Requirements:
 - Use Markdown formatting (paragraphs, a bullet list for Key topics, and an optional Example section).
 - Keep the language accessible and focused; do not produce JSON or extra metadata.
 """.strip()
+
+    intuitive_user_prompt = f"""
+You are an expert explainer. Given the following short selected text, produce a concise quick overview intended for a reader familiar with the surrounding topic.
+
+Selected text:
+{selection}
+
+Requirements:
+- Provide a clear 2-3 paragraph overview (each paragraph short, easy to scan). Start with a one-sentence core idea and a short analogy if useful.
+- After the overview, include a short "Key topics" section listing the main topics or concepts (3-6 bullet points).
+- Include a single 1-line teach-back prompt or micro-exercise at the end (e.g., "Explain X in one sentence" or "Predict what happens if Y doubles").
+- If an illustrative example helps, include a single short example at the end under an "Example" heading.
+- Use Markdown formatting (paragraphs, a bullet list for Key topics, and an optional Example section).
+- Keep the language accessible and focused; do not produce JSON or extra metadata.
+""".strip()
+
+    user_prompt = _choose(standard_user_prompt, intuitive_user_prompt, body)
 
     try:
         content, raw = _chat_text(model, temperature,
@@ -1205,26 +1281,49 @@ def visualize():
             return jsonify({"error": "Daily visualization limit reached"}), 429
         
         # Step A: Planning via LLM
-        planning_prompt = f"""
-You are an educational diagram/visual planner. Create a specification for a single educational image.
+        standard_planning_prompt = f"""
+        You are an educational diagram/visual planner. Create a specification for a single educational image.
 
-Topic: {topic}
-Node: {node.get('title', '')}
-Description: {node.get('description', '')}
-Content: {content[:2000] if content else 'No content yet'}
+        Topic: {topic}
+        Node: {node.get('title', '')}
+        Description: {node.get('description', '')}
+        Content: {content[:2000] if content else 'No content yet'}
 
-    Return ONLY a JSON object with:
-    - "prompt": string (crisp, concrete scene spec for a single diagram/plot/map/schematic)
-    - "caption": string (exactly one sentence, <= 25 words, describing the image)
+            Return ONLY a JSON object with:
+            - "prompt": string (crisp, concrete scene spec for a single diagram/plot/map/schematic)
+            - "caption": string (exactly one sentence, <= 25 words, describing the image)
 
-Requirements:
-- Prefer labeled axes, minimal colors, clear legends, readable typography
-- Avoid text-heavy scenes
-- Focus on a single, clear visual concept
-- Make it educational and informative
-- Use clear, descriptive language for image generation
-"""
-        
+        Requirements:
+        - Prefer labeled axes, minimal colors, clear legends, readable typography
+        - Avoid text-heavy scenes
+        - Focus on a single, clear visual concept
+        - Make it educational and informative
+        - Use clear, descriptive language for image generation
+        """
+
+        intuitive_planning_prompt = f"""
+        You are an educational diagram/visual planner. Create a specification for a single educational image that communicates the core intuition of the node.
+
+        Topic: {topic}
+        Node: {node.get('title', '')}
+        Description: {node.get('description', '')}
+        Content: {content[:2000] if content else 'No content yet'}
+
+            Return ONLY a JSON object with:
+            - "prompt": string (crisp, concrete scene spec for a single diagram/plot/map/schematic)
+            - "caption": string (exactly one sentence, <= 25 words, describing the image)
+
+        Requirements:
+        - Favor visuals that create an intuitive mental model (process flows, metaphors, axes showing relationships, simplified schematics).
+        - Prefer labeled axes, minimal colors, clear legends, readable typography
+        - Avoid text-heavy scenes
+        - Focus on a single, clear visual concept that supports a 1-line teach-back prompt
+        - Make it educational and informative
+        - Use clear, descriptive language for image generation
+        """
+
+        planning_prompt = _choose(standard_planning_prompt, intuitive_planning_prompt, body)
+
         parsed_plan, raw = _chat_json(body.get("model", "gpt-4o"), 0.3,
                                       "You are an educational diagram planner. Return only valid JSON with prompt and caption fields.",
                                       planning_prompt)
@@ -1320,29 +1419,33 @@ def generate_summary():
         if not content.strip():
             return jsonify({"error": "No content provided for summary"}), 400
         
-        # Create a prompt for summary generation
-        user_prompt = f"""
-Create a concise 3-4 sentence summary of the following content:
+        # Create a prompt for summary generation (standard vs intuitive)
+        standard_user_prompt = f"""
+        Create a concise 3-4 sentence summary of the following content:
 
-Topic: {body.get('topic', '')}
-Node: {node.get('title', '')}
+        Topic: {body.get('topic', '')}
+        Node: {node.get('title', '')}
 
-Content:
-{content}
+        Content:
+        {content}
 
-Requirements:
-- Keep it to exactly 3-4 sentences
-- Capture the key concepts and main points
-- Use clear, accessible language
-- Focus on the most important information
-"""
-        
+        Requirements:
+        - Keep it to exactly 3-4 sentences
+        - Capture the key concepts and main points
+        - Use clear, accessible language
+        - Focus on the most important information
+        """
+
+        intuitive_user_prompt = standard_user_prompt + "\n- After the summary, optionally add one short 1-line teach-back prompt or a 1-line visual analogy to help an intuition-first learner check understanding.\n"
+
+        user_prompt = _choose(standard_user_prompt, intuitive_user_prompt, body)
+
         # Use helper to call chat in text mode
         summary, raw = _chat_text(body.get("model", "gpt-4o"), body.get("temperature", 0.3),
                                  "You are an expert at creating concise, informative summaries. Always provide exactly 3-4 sentences that capture the essence of the content.",
                                  [{"role": "user", "content": user_prompt}])
         summary = summary.strip()
-        
+
         return jsonify({
             "summary": summary,
             "success": True

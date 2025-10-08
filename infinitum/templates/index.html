@@ -579,6 +579,11 @@
         </svg>
     </div>
 
+      <!-- Learning Mode Badge -->
+      <div id="learningModeBadge" title="Current Learning Mode" style="position:absolute; top:50%; transform:translateY(-50%); right:44px; z-index:1; font-size:12px; color:var(--muted); background:#fff; border:1px solid var(--ring); padding:6px 8px; border-radius:999px; display:flex; align-items:center; gap:6px;">
+        <strong style="font-weight:600; text-transform:capitalize;" id="learningModeBadgeText">Standard</strong>
+      </div>
+
       <div class="settings-panel" id="settingsPanel">
         <div class="settings-group">
           <label class="settings-label">Content Settings</label>
@@ -638,6 +643,13 @@
                 <option value="gpt-5-mini">gpt-5-mini</option>
               </select>
             </div>
+          <div class="settings-row">
+            <label for="selLearningMode">Learning Mode:</label>
+            <select id="selLearningMode">
+              <option value="standard">Standard</option>
+              <option value="intuitive">Intuitive</option>
+            </select>
+          </div>
           <div class="settings-row">
             <label for="inpTemp">Temperature:</label>
             <input type="range" id="inpTemp" min="0" max="1" step="0.05" value="0.3" />
@@ -1068,6 +1080,7 @@ Requirements:
       const depth = parseInt($("inpDepth").value || "3", 10);
       const sections = parseInt($("inpSections").value || "5", 10);
       const model = $("selModel").value;
+  const learningMode = $("selLearningMode")?.value || 'standard';
       const temperature = parseFloat($("inpTemp").value || "0.3");
 
       // Convert Maps and Sets to plain objects/arrays for JSON serialization
@@ -1149,6 +1162,7 @@ Requirements:
           depth,
           sections,
           model,
+          learningMode,
           temperature
         },
         toc: CURRENT_TOC,
@@ -1198,6 +1212,9 @@ Requirements:
         $("selModel").value = notebook.config.model || "gpt-4.1-mini";
         $("inpTemp").value = notebook.config.temperature || 0.3;
         $("tempVal").textContent = Number(notebook.config.temperature || 0.3).toFixed(2);
+        if (notebook.config.learningMode && $("selLearningMode")) {
+          $("selLearningMode").value = notebook.config.learningMode;
+        }
       }
 
       // Restore state
@@ -3064,11 +3081,12 @@ Requirements:
           const audience = $('inpAudience').value.trim() || 'general';
           const model = $('selModel').value;
           const temperature = parseFloat($('inpTemp').value || '0.3');
+          const learningMode = $('selLearningMode')?.value || 'standard';
 
           const resp = await fetch('/api/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ topic, audience, model, temperature, node: { id: 'foundations', title: 'Foundations' }, path: [], question, context: markdownContent, history: [] })
+            body: JSON.stringify({ topic, audience, model, temperature, learningMode, node: { id: 'foundations', title: 'Foundations' }, path: [], question, context: markdownContent, history: [] })
           });
           if (!resp.ok) throw new Error(await resp.text());
           const data = await resp.json();
@@ -3196,13 +3214,14 @@ Requirements:
         const topic = $("inpTopic").value.trim();
         const audience = $("inpAudience").value.trim() || "general";
         const model = $("selModel").value;
-        const temperature = parseFloat($("inpTemp").value || "0.3");
+  const temperature = parseFloat($("inpTemp").value || "0.3");
+  const learningMode = $("selLearningMode")?.value || 'standard';
         
         const resp = await fetch("/api/read", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ 
-            topic, audience, model, temperature, 
+            topic, audience, model, temperature, learningMode, 
             node: { id: node.id, title: node.title }, 
             path, level 
           })
@@ -4262,6 +4281,7 @@ Requirements:
           const audience = $("inpAudience").value.trim() || "general";
           const model = $("selModel").value;
           const temperature = parseFloat($("inpTemp").value || "0.3");
+          const learningMode = $("selLearningMode")?.value || 'standard';
           const history = CHAT_HISTORY.get(node.id) || [];
           // Use level-specific content if levels are enabled, otherwise use regular content
           let context = "(no content)";
@@ -4278,7 +4298,7 @@ Requirements:
           const resp = await fetch("/api/chat", {
               method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ topic, audience, model, temperature, node: { id: node.id, title: node.title }, path, question, context, history, level })
+            body: JSON.stringify({ topic, audience, model, temperature, learningMode, node: { id: node.id, title: node.title }, path, question, context, history, level })
           });
           if (!resp.ok) throw new Error(await resp.text());
             const data = await resp.json();
@@ -4436,11 +4456,12 @@ Requirements:
       const sections = parseInt($("inpSections").value || "5", 10);
       const model = $("selModel").value;
       const temperature = parseFloat($("inpTemp").value || "0.3");
+  const learningMode = $("selLearningMode")?.value || 'standard';
 
       const resp = await fetch("/api/expand", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic, audience, depth, sections, model, temperature, node: { id: node.id, title: node.title }, path })
+        body: JSON.stringify({ topic, audience, depth, sections, model, temperature, learningMode, node: { id: node.id, title: node.title }, path })
       });
       if (!resp.ok) throw new Error(await resp.text());
       const data = await resp.json();
@@ -4457,6 +4478,7 @@ Requirements:
       const sections = parseInt($("inpSections").value || "5", 10);
       const model = $("selModel").value;
       const temperature = parseFloat($("inpTemp").value || "0.3", 10);
+  const learningMode = $("selLearningMode")?.value || 'standard';
 
       // If mock mode, create a small mock foundations structure
       if (!LIVE) {
@@ -4489,7 +4511,7 @@ Requirements:
         const resp = await fetch('/api/foundations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topic, audience, depth, sections, model, temperature, node: { id: node.id, title: node.title } })
+          body: JSON.stringify({ topic, audience, depth, sections, model, temperature, learningMode, node: { id: node.id, title: node.title } })
         });
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
@@ -4665,12 +4687,13 @@ Requirements:
       const sections = parseInt($("inpSections").value || "5", 10);
       const model = $("selModel").value;
       const temperature = parseFloat($("inpTemp").value || "0.3");
+  const learningMode = $("selLearningMode")?.value || 'standard';
 
       try {
         const resp = await fetch("/api/read", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topic, audience, depth, sections, model, temperature, node: { id: node.id, title: node.title }, path })
+          body: JSON.stringify({ topic, audience, depth, sections, model, temperature, learningMode, node: { id: node.id, title: node.title }, path })
         });
         if (!resp.ok) throw new Error(await resp.text());
         const data = await resp.json();
@@ -4737,10 +4760,11 @@ Requirements:
           }));
           result = { toc: clone.toc };
         } else {
+          const learningMode = $("selLearningMode")?.value || 'standard';
           const resp = await fetch("/api/toc", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ topic, audience, depth, sections, model, temperature })
+            body: JSON.stringify({ topic, audience, depth, sections, model, temperature, learningMode })
           });
           if (!resp.ok) throw new Error(await resp.text());
           result = await resp.json();
@@ -5122,10 +5146,11 @@ Requirements:
 
         } else {
           // No cache: fetch from server, display, create deep-mark and cache result
+          const learningMode = $("selLearningMode")?.value || 'standard';
           const resp = await fetch('/api/quickdive', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ topic, audience, model, temperature, node: { id: node.id, title: node.title }, path, selection: { text: selectionInfo.text, snippet: selectionInfo.snippet } })
+            body: JSON.stringify({ topic, audience, model, temperature, learningMode, node: { id: node.id, title: node.title }, path, selection: { text: selectionInfo.text, snippet: selectionInfo.snippet } })
           });
           if (!resp.ok) throw new Error(await resp.text());
           const data = await resp.json();
@@ -5215,6 +5240,21 @@ Requirements:
         document.getElementById('inpTemp').addEventListener('input', (e) => {
           document.getElementById('tempVal').textContent = parseFloat(e.target.value).toFixed(2);
         });
+        // Learning Mode selector: initialize from localStorage or default and persist changes
+        const lmEl = document.getElementById('selLearningMode');
+        if (lmEl) {
+          const saved = localStorage.getItem('playbook_learning_mode');
+          lmEl.value = saved || lmEl.value || 'standard';
+          lmEl.addEventListener('change', (e) => {
+            localStorage.setItem('playbook_learning_mode', e.target.value);
+            autosave();
+            const badge = document.getElementById('learningModeBadgeText');
+            if (badge) badge.textContent = e.target.value || 'standard';
+          });
+        }
+        // Initialize badge text from selector value
+        const badgeInit = document.getElementById('learningModeBadgeText');
+        if (badgeInit && lmEl) badgeInit.textContent = lmEl.value || 'standard';
 
         // Annotation modal button wiring
         const annSave = $('annotationSave');
