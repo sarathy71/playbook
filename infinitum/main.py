@@ -62,12 +62,50 @@ def _get_learning_mode_from(body=None) -> str:
     if body and isinstance(body, dict):
         for key in ('learningMode', 'learning_mode', 'learningmode', 'mode'):
             if key in body and isinstance(body.get(key), str):
-                return 'intuitive' if body.get(key).strip().lower() == 'intuitive' else 'standard'
+                val = body.get(key).strip().lower()
+                if val in ('intuitive', 'int'):
+                    return 'intuitive'
+                if val in ('hyper', 'hyperlearner'):
+                    return 'hyper'
+                return 'standard'
     return 'intuitive' if lm == 'intuitive' else 'standard'
 
 
-def _choose(standard_text: str, intuitive_text: str, body=None) -> str:
-    return intuitive_text if _get_learning_mode_from(body) == 'intuitive' else standard_text
+def _choose(standard_text: str, intuitive_text: str, body=None, hyper_text: str = None) -> str:
+    """Pick the prompt text according to the learning mode.
+
+    If hyper_text is provided and the mode is 'hyper', return hyper_text.
+    Otherwise return intuitive or standard accordingly.
+    """
+    mode = _get_learning_mode_from(body)
+    if mode == 'hyper' and hyper_text is not None:
+        return hyper_text
+    if mode == 'intuitive':
+        return intuitive_text
+    return standard_text
+# Hyper Learner System Prompt — harmonized structure for TOC, layered pedagogy for READ/DEEPDIVE
+HYPER_SYSTEM_PROMPT = (
+    "You are an expert curriculum designer who teaches using the Intuitive Systems Learning Framework. "
+    "For any Table of Contents (TOC) generation, maintain the same clarity, balance, and hierarchical structure "
+    "as the Intuitive (Conceptual & Intuition-First) mode — clean outline, progressive depth, and concise titles. "
+    "Do NOT include long narrative sections or seven-stage breakdowns inside TOC nodes. "
+    "Each section title should reflect meaningful conceptual progression (Foundations → Applications → Advanced ideas). "
+    "Add short one-sentence descriptions or analogical hints only where helpful for clarity. "
+    "Keep the TOC purely structural, not expository. "
+    "\n\n"
+    "However, when producing READ or DEEPDIVE content, fully apply the 7-stage Intuitive Systems Learning Framework: "
+    "1) Foundations Mapping — prerequisite ideas and why they matter; "
+    "2) Historical Context & Motivation — origins and problems solved; "
+    "3) Conceptual Overview (Top-Down Intuition) — big-picture core idea and visual analogies; "
+    "4) Analytical Structure (Bottom-Up Logic) — detailed mechanics, algorithms, or proofs tied to intuition; "
+    "5) Quizzify — 3–6 conceptual ‘what-if’ reasoning prompts with expected outcomes; "
+    "6) Integration & Application — links to related fields, teach-back prompts, and small applied tasks; "
+    "7) Future Directions — next steps, research areas, and advanced extensions. "
+    "\n\n"
+    "Maintain an exploratory, visual tone — intuition first, structure second, reasoning last. "
+    "Encourage reflection through teach-back and micro-exercises where appropriate."
+)
+
 
 def _slug(s: str) -> str:
     import re
@@ -491,8 +529,31 @@ Requirements:
 - Prefer 3–7 top-level sections unless topic is very narrow.
 """.strip()
 
-    user_prompt = _choose(standard_user_prompt, intuitive_user_prompt, body)
-    parsed, raw = _chat_json(model, temperature, _choose(STANDARD_SYSTEM_PROMPT, INTUITIVE_SYSTEM_PROMPT, body), user_prompt)
+    # Hyper Learner user prompt (follows the Intuitive Systems Learning Framework)
+    hyper_user_prompt = f"""
+Topic: {topic}
+Audience: {audience}
+Desired depth/levels: {depth}
+Target sections per level (approx): {sections}
+
+Instructions (Hyper Learner): Follow the Intuitive Systems Learning Framework stages.
+- Foundations Mapping: list essential prerequisites (4–8) and a 1–2 sentence note on why each prerequisite is required.
+- Historical Context & Motivation: give a concise origin story explaining the problems this topic was created to solve.
+- Conceptual Overview: supply a top-down mental model, visual analogy(s), and a short 'core idea' sentence.
+- Analytical Structure: outline the main components, mechanisms, or algorithms and show how they connect to the top-down model.
+- Quizzify: give 3–6 conceptual 'what-if' or reasoning questions with brief expected outcomes or hints.
+- Integration & Application: map links to 3 related topics and suggest 1–2 small applied exercises or teach-back prompts.
+- Future Directions: list 3 advanced or frontier directions to explore next.
+
+Requirements:
+- Return ONLY valid JSON matching the schema {{ toc: TocNode[] }}.
+- Each TocNode: {{ id: string (slug), title: string, description?: string, children?: TocNode[] }}
+- Keep top-level sections meaningful, include short analogies or 'core idea' snippets for high-level nodes when helpful.
+""".strip()
+
+    user_prompt = _choose(standard_user_prompt, intuitive_user_prompt, body, hyper_text=hyper_user_prompt)
+    system_choice = _choose(STANDARD_SYSTEM_PROMPT, INTUITIVE_SYSTEM_PROMPT, body, hyper_text=HYPER_SYSTEM_PROMPT)
+    parsed, raw = _chat_json(model, temperature, system_choice, user_prompt)
     toc = _ensure_ids(parsed.get("toc", []))
 
     # Best-effort: also fetch content for the first top-level node so the client
@@ -611,12 +672,16 @@ Short summary...
 
     intuitive_user_prompt_read = standard_user_prompt_read + "\n\nPedagogy guidance:\n- Use a Conceptual & Intuition-First style: start the guide with one-sentence core idea and a short visual analogy that links the prerequisites to the current item.\n- For each prerequisite, where possible, include a 1-line \"teach-back\" prompt (e.g., \"Explain X in one sentence\" or \"Draw a quick sketch showing Y\") the learner can use to test understanding.\n- Prefer concrete examples and 1–2 micro-exercises that build intuition rather than rote memorization.\n"
 
-    user_prompt_read = _choose(standard_user_prompt_read, intuitive_user_prompt_read, body)
+    # Hyper Learner variant for Foundations/read: follow the 7-stage Intuitive Systems Learning Framework
+    hyper_user_prompt_read = standard_user_prompt_read + "\n\nHyper Learner guidance:\n- Start with Foundations Mapping: list prerequisites and why they matter.\n- Provide Historical Context: brief origin / motivation.\n- Provide a concise Conceptual Overview (visual analogy + core idea).\n- Then the Analytical Structure with stepwise components.\n- Include a Quizzify section (3-6 conceptual what-if questions with expected outcomes or hints).\n- Add Integration & Application suggestions (teach-back prompts or small applied tasks).\n- End with Future Directions and advanced next steps.\n"
+
+    user_prompt_read = _choose(standard_user_prompt_read, intuitive_user_prompt_read, body, hyper_text=hyper_user_prompt_read)
 
     try:
-        content, raw = _chat_text(model, temperature,
-                                  "You are an expert curriculum designer. Produce a Foundations guide in Markdown as specified.",
-                                  [{"role": "user", "content": user_prompt_read}])
+        system_choice = _choose("You are an expert curriculum designer. Produce a Foundations guide in Markdown as specified.",
+                               "You are an expert curriculum designer. Produce a Foundations guide in Markdown as specified.",
+                               body, hyper_text=HYPER_SYSTEM_PROMPT)
+        content, raw = _chat_text(model, temperature, system_choice, [{"role": "user", "content": user_prompt_read}])
         if not content or not isinstance(content, str):
             abort(500, "Foundations generation failed: no content returned")
         return jsonify({"content": content, "model": raw.get("model"), "tokens": raw.get("usage")})
@@ -981,7 +1046,13 @@ Style guidelines:
 - Do not surround TeX with normal parentheses or brackets, and do not put math inside code fences
 """.strip()
 
-    parsed, raw = _chat_json(model, temperature, system_prompt, user_prompt)
+    # Choose the system prompt according to learning mode (supports hyper)
+    system_choice = _choose(system_prompt, system_prompt, body, hyper_text=HYPER_SYSTEM_PROMPT)
+    # If hyper mode is requested, append explicit hyper guidance to the user prompt
+    if _get_learning_mode_from(body) == 'hyper':
+        hyper_add = "\n\nHyper Learner guidance:\n- In the Overview include Foundations Mapping (prereqs), Historical Context, Conceptual Overview with visual analogy, Analytical Structure, Quizzify (3 conceptual questions + brief expected answers), Integration exercises, and Future Directions.\n- Keep Overview ~200-300 words and Quizzify concise and conceptual.\n"
+        user_prompt = user_prompt + hyper_add
+    parsed, raw = _chat_json(model, temperature, system_choice, user_prompt)
     
     # Extract the response components
     short_name = parsed.get("shortName", "").strip()
