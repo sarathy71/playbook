@@ -593,9 +593,12 @@
         const isEnter = (e.key === 'Enter' || e.code === 'Enter');
         if (!isEnter) return;
 
-        if (e.ctrlKey) {
+        // Treat Ctrl+Enter (Windows/Linux) or Meta+Enter (macOS) as "insert newline"
+        if (e.ctrlKey || e.metaKey) {
           // Insert newline at caret position
           e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
           const el = this;
           try {
             const start = el.selectionStart || 0;
@@ -614,11 +617,13 @@
 
         // Enter without Ctrl: send
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         if (send) send.click();
       });
 
-      // Prevent accidental form submission if inside a form
-      inp.addEventListener('keypress', function(e){ if (e.key === 'Enter' && !e.ctrlKey) e.preventDefault(); });
+  // Prevent accidental form submission if inside a form, but allow Ctrl+Enter or Meta+Enter
+  inp.addEventListener('keypress', function(e){ if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) e.preventDefault(); });
     })();
   </script>
 
@@ -1975,8 +1980,8 @@ Requirements:
       const range = selection.getRangeAt(0);
       const text = selection.toString().trim();
       
-      // Validate selection length (allow shorter selections down to 3 chars)
-      if (text.length < 3 || text.length > 3000) {
+      // Validate selection length (allow shorter selections down to 2 chars)
+      if (text.length < 2 || text.length > 3000) {
         return null;
       }
 
@@ -3611,11 +3616,32 @@ Requirements:
 
             // Sanitize final composed content if independence requested
             finalComposed = includeContext ? finalComposed : sanitizeParentMentions(finalComposed);
-            CONTENT.set(overviewId, normalizeMathDelimiters(finalComposed));
-            if (!CHAT_HISTORY.has(overviewId)) CHAT_HISTORY.set(overviewId, []);
-            CHAT_HISTORY.get(overviewId).push({ role: 'system', content: `Overview created from selection: "${selectionInfo.snippet}"`, ts: new Date().toISOString() });
-            checkVisualizationEligibility(overviewId);
-            autosave();
+            // Instead of storing deep-dive overview in CONTENT (single-content mode),
+            // enable Levels UI for the deep-dive wrapper and seed the Beginner (Level 1)
+            // content with the composed overview so users see a Beginner explanation by default.
+            try {
+              const normalized = normalizeMathDelimiters(finalComposed);
+              // Enable levels UI and set active level to Beginner (1)
+              LEVELS_ENABLED.add(overviewId);
+              if (!LEVEL_CONTENT.has(overviewId)) LEVEL_CONTENT.set(overviewId, new Map());
+              LEVEL_CONTENT.get(overviewId).set(1, normalized);
+              ACTIVE_LEVEL.set(overviewId, 1);
+              // Ensure single-content map does not also hold the same content
+              CONTENT.delete(overviewId);
+
+              if (!CHAT_HISTORY.has(overviewId)) CHAT_HISTORY.set(overviewId, []);
+              CHAT_HISTORY.get(overviewId).push({ role: 'system', content: `Overview created from selection: "${selectionInfo.snippet}"`, ts: new Date().toISOString() });
+              checkVisualizationEligibility(overviewId);
+              autosave();
+            } catch (err) {
+              console.warn('Failed to initialize deep-dive levels content:', err);
+              // Fallback: store in CONTENT so the overview is not lost
+              CONTENT.set(overviewId, normalizeMathDelimiters(finalComposed));
+              if (!CHAT_HISTORY.has(overviewId)) CHAT_HISTORY.set(overviewId, []);
+              CHAT_HISTORY.get(overviewId).push({ role: 'system', content: `Overview created from selection: "${selectionInfo.snippet}"`, ts: new Date().toISOString() });
+              checkVisualizationEligibility(overviewId);
+              autosave();
+            }
           } catch (e) { console.warn('Failed to compose overview content:', e); }
 
           // Track deep dive
@@ -4921,13 +4947,7 @@ Requirements:
     });
     $("btnUndo").addEventListener("click", undoLastChange);
     
-    // Enter key listener for Topic text field
-    $("inpTopic").addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !$("btnGen").disabled) {
-        e.preventDefault();
-        generate();
-      }
-    });
+    // ...existing key handling is implemented earlier near the textarea (handles Enter vs Ctrl/Cmd+Enter)
     
     // Navigation mode toggle listeners
     $("navLeftNav").addEventListener("change", (e) => {

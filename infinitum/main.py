@@ -531,24 +531,57 @@ Requirements:
 
     # Hyper Learner user prompt (follows the Intuitive Systems Learning Framework)
     hyper_user_prompt = f"""
-Topic: {topic}
+Topic or Input: {topic}
 Audience: {audience}
 Desired depth/levels: {depth}
 Target sections per level (approx): {sections}
 
-Instructions (Hyper Learner): Follow the Intuitive Systems Learning Framework stages.
-- Foundations Mapping: list essential prerequisites (4–8) and a 1–2 sentence note on why each prerequisite is required.
-- Historical Context & Motivation: give a concise origin story explaining the problems this topic was created to solve.
-- Conceptual Overview: supply a top-down mental model, visual analogy(s), and a short 'core idea' sentence.
-- Analytical Structure: outline the main components, mechanisms, or algorithms and show how they connect to the top-down model.
-- Quizzify: give 3–6 conceptual 'what-if' or reasoning questions with brief expected outcomes or hints.
-- Integration & Application: map links to 3 related topics and suggest 1–2 small applied exercises or teach-back prompts.
-- Future Directions: list 3 advanced or frontier directions to explore next.
+You are the Hyper Learner mode of the Intuitive Systems Learning Framework.
+Your task is to produce a clean, hierarchical Table of Contents (TOC) formatted as valid JSON using the schema:
+{{ toc: TocNode[] }}, where each TocNode = {{ id: string, title: string, description?: string, children?: TocNode[] }}.
 
-Requirements:
-- Return ONLY valid JSON matching the schema {{ toc: TocNode[] }}.
-- Each TocNode: {{ id: string (slug), title: string, description?: string, children?: TocNode[] }}
-- Keep top-level sections meaningful, include short analogies or 'core idea' snippets for high-level nodes when helpful.
+---
+
+### DETECTION LOGIC
+If the user input already appears to be a **Table of Contents, outline, or hierarchical list** (e.g., lines beginning with numbers, bullets, or indentation):
+- Do NOT generate a new TOC.
+- Preserve all original section and subsection titles exactly as given.
+- Convert it faithfully into the JSON TocNode structure.
+- Keep the hierarchy consistent with the indentation or numbering of the input.
+- For each node, enrich it slightly based on the learning mode style:
+    - **Standard mode:** Add only minimal clarification if a title is vague.
+    - **Intuitive mode:** Add a 1-sentence conceptual hook or visual analogy.
+    - **Hyper mode:** Add a 1–2 sentence “core idea” or “why this matters” insight.
+- Return the full converted JSON TOC with IDs as clean URL-safe slugs.
+
+If the input is **not** an existing TOC (i.e., it’s just a topic or concept name):
+- Generate a new optimal TOC following the user profile and topic.
+- Ensure a progressive conceptual flow (Foundations → Applications → Advanced Directions).
+- Each top-level node should represent a distinct conceptual layer, with 3–7 sections where possible.
+- Use concise, meaningful titles and short analogical descriptions when helpful.
+
+---
+
+### LEARNING FRAMEWORK CONTEXT
+When constructing or enriching sections, align with the Intuitive Systems Learning Framework stages conceptually:
+1. **Foundations Mapping** — include prerequisite subtopics.
+2. **Historical Context & Motivation** — brief origin or reason the idea emerged.
+3. **Conceptual Overview** — intuitive big picture or analogy.
+4. **Analytical Structure** — how components or mechanisms fit together.
+5. **Quizzify** — optional short reasoning or “what-if” hints.
+6. **Integration & Application** — cross-links or use cases.
+7. **Future Directions** — advanced or emerging areas.
+
+You are NOT writing full content — just encoding this *structure and pedagogical intent* into the TOC descriptions.
+
+---
+
+### OUTPUT RULES
+- Return ONLY valid JSON.
+- Each node must include a unique, URL-safe `id` derived from its title.
+- Do not include explanatory paragraphs or full prose.
+- Keep the hierarchy balanced, intuitive, and ready for layered content delivery.
+
 """.strip()
 
     user_prompt = _choose(standard_user_prompt, intuitive_user_prompt, body, hyper_text=hyper_user_prompt)
@@ -941,8 +974,9 @@ def api_deepdive():
         abort(400, "Missing topic, node, or selection.")
 
     selection_text = selection.get("text", "").strip()
-    if len(selection_text) < 8:
-        abort(400, "Selection too short. Please select at least 8 characters.")
+    # Allow very short selections (minimum 2 chars) to support tight snippets
+    if len(selection_text) < 2:
+        abort(400, "Selection too short. Please select at least 2 characters.")
     if len(selection_text) > 3000:
         abort(400, "Selection too long. Please select less than 3000 characters.")
 
