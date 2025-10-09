@@ -566,11 +566,11 @@
         <div class="title" style="z-index: 1;">Playbook</div>
       </div>
   <div class="flex" style="justify-content:center; flex: 1; margin: 0 120px 0 140px;">
-  <input id="inpTopic" type="text" placeholder="e.g., Neural Networks, Ramayana, Corporate Finance" style="margin-right: 8px; padding: 8px 12px; border: 1px solid var(--ring); border-radius: 6px; font-size: 14px; min-width: 300px;" />
+  <textarea id="inpTopic" rows="2" placeholder="e.g., Neural Networks, Ramayana, Corporate Finance" aria-label="Topic" class="chat-input" style="margin-right: 8px; padding: 8px 12px; border: 1px solid var(--ring); border-radius: 8px; font-size: 14px; min-width: 300px; min-height:42px; resize:vertical;"></textarea>
   <button id="btnGen" class="btn">Learn</button>
   <button id="btnFoundations" class="btn btn-ghost" style="margin-left:8px; font-size:13px;">Foundations</button>
   <button id="btnNotes" class="btn btn-ghost" style="margin-left:8px; font-size:13px;">Notes</button>
-      </div>
+    </div>
       
       <!-- Settings Panel -->
       <div class="gear-icon" onclick="toggleSettings()" title="Settings" style="position:absolute; top:50%; transform:translateY(-50%); right:4px; z-index: 1;">
@@ -578,6 +578,49 @@
           <path d="M12,15.5A3.5,3.5 0 0,1 8.5,12A3.5,3.5 0 0,1 12,8.5A3.5,3.5 0 0,1 15.5,12A3.5,3.5 0 0,1 12,15.5M19.43,12.97C19.47,12.65 19.5,12.33 19.5,12C19.5,11.67 19.47,11.34 19.43,11L21.54,9.37C21.73,9.22 21.78,8.95 21.66,8.73L19.66,5.27C19.54,5.05 19.27,4.96 19.05,5.05L16.56,6.05C16.04,5.66 15.5,5.32 14.87,5.07L14.5,2.42C14.46,2.18 14.25,2 14,2H10C9.75,2 9.54,2.18 9.5,2.42L9.13,5.07C8.5,5.32 7.96,5.66 7.44,6.05L4.95,5.05C4.73,4.96 4.46,5.05 4.34,5.27L2.34,8.73C2.22,8.95 2.27,9.22 2.46,9.37L4.57,11C4.53,11.34 4.5,11.67 4.5,12C4.5,12.33 4.53,12.65 4.57,12.97L2.46,14.63C2.27,14.78 2.22,15.05 2.34,15.27L4.34,18.73C4.46,18.95 4.73,19.03 4.95,18.95L7.44,17.94C7.96,18.34 8.5,18.68 9.13,18.93L9.5,21.58C9.54,21.82 9.75,22 10,22H14C14.25,22 14.46,21.82 14.5,21.58L14.87,18.93C15.5,18.68 16.04,18.34 16.56,17.94L19.05,18.95C19.27,19.03 19.54,18.95 19.66,18.73L21.66,15.27C21.78,15.05 21.73,14.78 21.54,14.63L19.43,12.97Z"/>
         </svg>
     </div>
+
+  <script>
+    // Keyboard behavior for the main prompt textarea:
+    // Enter (no modifier) -> send (click Learn)
+    // Ctrl+Enter -> insert newline at caret
+    (function(){
+      const inp = document.getElementById('inpTopic');
+      const send = document.getElementById('btnGen');
+      if (!inp) return;
+
+      inp.addEventListener('keydown', function(e){
+        // Normalize keys across platforms
+        const isEnter = (e.key === 'Enter' || e.code === 'Enter');
+        if (!isEnter) return;
+
+        if (e.ctrlKey) {
+          // Insert newline at caret position
+          e.preventDefault();
+          const el = this;
+          try {
+            const start = el.selectionStart || 0;
+            const end = el.selectionEnd || 0;
+            const val = el.value || '';
+            el.value = val.slice(0, start) + '\n' + val.slice(end);
+            el.selectionStart = el.selectionEnd = start + 1;
+            // Fire input event so any listeners (autosave, UI) update
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+          } catch (err) {
+            // Fallback: append newline
+            el.value = (el.value || '') + '\n';
+          }
+          return;
+        }
+
+        // Enter without Ctrl: send
+        e.preventDefault();
+        if (send) send.click();
+      });
+
+      // Prevent accidental form submission if inside a form
+      inp.addEventListener('keypress', function(e){ if (e.key === 'Enter' && !e.ctrlKey) e.preventDefault(); });
+    })();
+  </script>
 
       <!-- Learning Mode Badge -->
       <div id="learningModeBadge" title="Current Learning Mode" style="position:absolute; top:50%; transform:translateY(-50%); right:44px; z-index:1; font-size:12px; color:var(--muted); background:#fff; border:1px solid var(--ring); padding:6px 8px; border-radius:999px; display:flex; align-items:center; gap:6px;">
