@@ -2,7 +2,9 @@ import os
 import json
 import uuid
 import datetime
-from flask import Flask, request, jsonify, render_template, abort
+from flask import Flask, request, jsonify, render_template, abort, g
+import time
+import logging
 from dotenv import load_dotenv
 import requests
 from openai import OpenAI
@@ -30,6 +32,52 @@ DEV_MAX_PROMPT_TOKENS = int(os.getenv('INFITUM_DEV_MAX_PROMPT_TOKENS', '0'))
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 app = Flask(__name__)
+
+# Basic logging for timing: INFO level
+logging.basicConfig(level=logging.INFO)
+
+
+@app.before_request
+def _timing_before_request():
+    """Record start time and log request start."""
+    try:
+        g._start_time = time.time()
+        # Add a small preview to help identify request purpose without logging full bodies
+        preview = ''
+        if request.is_json:
+            try:
+                b = request.get_json(silent=True) or {}
+                if isinstance(b, dict):
+                    if 'topic' in b:
+                        preview = f" topic={str(b.get('topic'))[:64]}"
+                    elif 'selection' in b and isinstance(b.get('selection'), dict):
+                        txt = (b.get('selection') or {}).get('text','') or ''
+                        preview = f" selection_len={len(txt)}"
+            except Exception:
+                preview = ''
+        logging.info(f"[TIMING] START {request.method} {request.path}{preview}")
+    except Exception:
+        try:
+            logging.info(f"[TIMING] START {request.method} {request.path}")
+        except Exception:
+            pass
+
+
+@app.after_request
+def _timing_after_request(response):
+    """Compute elapsed time, log it, and attach a header with elapsed ms."""
+    try:
+        start = getattr(g, '_start_time', None)
+        if start:
+            elapsed_ms = int((time.time() - start) * 1000)
+            logging.info(f"[TIMING] END {request.method} {request.path} took {elapsed_ms}ms")
+            try:
+                response.headers['X-Elapsed-MS'] = str(elapsed_ms)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return response
 
 SYSTEM_PROMPT = (
     "You are an expert curriculum designer and information architect. "
@@ -270,7 +318,13 @@ def _chat_json(model, temperature, system, user):
             pass
 
         def do_post(p):
+            start_ext = time.time()
             rr = requests.post(url, headers=headers, json=p, timeout=60)
+            try:
+                elapsed_ext = int((time.time() - start_ext) * 1000)
+                logging.info(f"[EXTERNAL] POST {url} model={p.get('model')} took {elapsed_ext}ms")
+            except Exception:
+                pass
             return rr
 
         r = do_post(payload)
@@ -348,7 +402,13 @@ def _chat_json(model, temperature, system, user):
                 {"role": "user", "content": user},
             ],
         }
+        start_ext = time.time()
         r = requests.post(url, headers=headers, json=payload, timeout=60)
+        try:
+            elapsed_ext = int((time.time() - start_ext) * 1000)
+            logging.info(f"[EXTERNAL] POST {url} model={payload.get('model')} took {elapsed_ext}ms")
+        except Exception:
+            pass
         if not r.ok:
             abort(r.status_code, r.text)
         data = r.json()
@@ -439,7 +499,14 @@ def _chat_text(model, temperature, system, messages):
             pass
 
         def do_post(p):
-            return requests.post(url, headers=headers, json=p, timeout=60)
+            start_ext = time.time()
+            rr = requests.post(url, headers=headers, json=p, timeout=60)
+            try:
+                elapsed_ext = int((time.time() - start_ext) * 1000)
+                logging.info(f"[EXTERNAL] POST {url} model={p.get('model')} took {elapsed_ext}ms")
+            except Exception:
+                pass
+            return rr
 
         r = do_post(payload)
         # retry with DEV_MODEL if model-not-found
@@ -467,7 +534,13 @@ def _chat_text(model, temperature, system, messages):
             "temperature": temperature,
             "messages": [{"role": "system", "content": system}] + messages,
         }
+        start_ext = time.time()
         r = requests.post(url, headers=headers, json=payload, timeout=60)
+        try:
+            elapsed_ext = int((time.time() - start_ext) * 1000)
+            logging.info(f"[EXTERNAL] POST {url} model={payload.get('model')} took {elapsed_ext}ms")
+        except Exception:
+            pass
         if not r.ok:
             abort(r.status_code, r.text)
         data = r.json()
@@ -491,7 +564,7 @@ def api_toc():
     topic = body.get("topic", "").strip()
     if not topic:
         abort(400, "Topic is required.")
-    audience = body.get("audience", "general")
+    audience = body.get("audience", "general")  # optional
     depth = int(body.get("depth", 3))
     sections = int(body.get("sections", 5))
     model = body.get("model", "gpt-4.1-mini")
@@ -646,7 +719,7 @@ def api_foundations():
     topic = body.get("topic", "").strip()
     if not topic:
         abort(400, "Topic is required.")
-    audience = body.get("audience", "general")
+    audience = body.get("audience", "general")  # optional
     depth = int(body.get("depth", 3))
     sections = int(body.get("sections", 5))
     model = body.get("model", "gpt-4.1-mini")
@@ -1460,7 +1533,13 @@ def visualize():
                     abort(500, "DEV server URL not configured for image generation")
                 img_url = DEV_SERVER.rstrip('/') + '/v1/images.generate'
                 img_payload = {"model": "dall-e-3", "prompt": image_prompt, "size": "1024x1024", "n": 1}
+                start_ext = time.time()
                 img_resp = requests.post(img_url, json=img_payload, timeout=60)
+                try:
+                    elapsed_ext = int((time.time() - start_ext) * 1000)
+                    logging.info(f"[EXTERNAL] POST {img_url} model={img_payload.get('model')} took {elapsed_ext}ms")
+                except Exception:
+                    pass
                 if not img_resp.ok:
                     raise Exception(f"Image generation failed: {img_resp.status_code} {img_resp.text}")
                 img_data = img_resp.json()
