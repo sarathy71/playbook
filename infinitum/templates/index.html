@@ -173,6 +173,30 @@
       border-radius: 6px;
     }
     .highlight-context-menu button:hover { background:#f3f4f6; }
+    /* TOC context menu */
+    #toc-context-menu {
+      position: absolute;
+      z-index: 2200;
+      background: #fff;
+      border: 1px solid var(--ring);
+      border-radius: 8px;
+      padding: 6px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+      display: none;
+      min-width: 220px;
+      font-size: 13px;
+    }
+    #toc-context-menu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 8px 10px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    #toc-context-menu button:hover { background: #f3f4f6; }
   .annotated { text-decoration: underline; text-decoration-color: #2563eb; text-decoration-thickness: 2px; cursor: pointer; }
   /* Annotation editor modal (re-use modal styling but keep small) */
   .annotation-modal { display:none; position:fixed; z-index:2100; left:50%; top:50%; transform:translate(-50%,-50%); background:#fff; border:1px solid var(--ring); border-radius:12px; padding:12px; min-width:320px; box-shadow:0 8px 24px rgba(0,0,0,0.12); }
@@ -812,6 +836,13 @@
     <button id="ctxRemoveHighlight">Remove highlight</button>
   </div>
 
+  <!-- TOC (left-nav) context menu -->
+  <div id="toc-context-menu" role="menu" aria-hidden="true">
+    <button id="ctxInsertBefore">Insert new chapter before</button>
+    <button id="ctxInsertAfter">Insert new chapter after</button>
+    <button id="ctxDeleteNode" class="danger">Delete</button>
+  </div>
+
   <!-- Annotation modal -->
   <div id="annotationModal" class="annotation-modal" role="dialog" aria-hidden="true">
     <div style="font-weight:600; margin-bottom:8px;">Annotation</div>
@@ -1081,7 +1112,7 @@ Requirements:
   // Keep a snapshot of the last saved notebook (serialized) so we can detect unsaved changes
   let LAST_SAVED_SNAPSHOT = null;
   let NOTES = '';
-    let CURRENT_TOC = [];
+  let CURRENT_TOC = [];
     let BREAD = [];                 // [{id,title}, ...]
     const EXP_CACHE = new Map();    // nodeId -> children[]
     const EXPANDED = new Set();     // nodeId -> expanded?
@@ -1120,6 +1151,19 @@ Requirements:
   const HIGHLIGHTS = new Map(); // nodeId -> [{id, text, snippet, xpath, startOffset, endOffset}]
   const ANNOTATIONS = new Map(); // nodeId -> [{id, text, snippet, xpath, note}]
   const DEEP_MARKS = new Map(); // nodeId -> [{id, text, snippet, xpath, wrapperId}]
+
+    // Global notebook summary object for external integrations
+    let CURRENT_NOTEBOOK = { toc: CURRENT_TOC, content: {} };
+
+    function syncCurrentNotebook() {
+      try {
+        CURRENT_NOTEBOOK.toc = CURRENT_TOC;
+        // Convert CONTENT Map to plain object
+        const obj = {};
+        for (const [k, v] of CONTENT) obj[k] = v;
+        CURRENT_NOTEBOOK.content = obj;
+      } catch (e) { console.warn('syncCurrentNotebook failed', e); }
+    }
 
     // ----------------------- Notebook Functions -----------------------
     function serializeNotebook() {
@@ -1969,6 +2013,221 @@ Requirements:
       }
       return false;
     }
+
+      // ----------------------- TOC Context Menu & Edit Helpers -----------------------
+      function showTocContextMenu(nodeId, ev) {
+        try {
+          const menu = $('toc-context-menu');
+          if (!menu) return;
+          // Position menu near cursor, but keep inside viewport
+          const x = ev.clientX;
+          const y = ev.clientY;
+          menu.style.left = x + 'px';
+          menu.style.top = y + 'px';
+          menu.style.display = 'block';
+          menu.setAttribute('data-for-node', nodeId);
+          // Attach handlers for menu actions
+          // Insert Before
+          const btnBefore = $('ctxInsertBefore');
+          const btnAfter = $('ctxInsertAfter');
+          const btnDelete = $('ctxDeleteNode');
+          if (btnBefore) {
+            btnBefore.onclick = (e) => { e.stopPropagation(); hideTocContextMenu(); insertNewNodeInline(nodeId, 'before'); };
+          }
+          if (btnAfter) {
+            btnAfter.onclick = (e) => { e.stopPropagation(); hideTocContextMenu(); insertNewNodeInline(nodeId, 'after'); };
+          }
+          if (btnDelete) {
+            btnDelete.onclick = (e) => { e.stopPropagation(); hideTocContextMenu(); deleteTocNode(nodeId); };
+          }
+        } catch (e) { console.warn('showTocContextMenu failed', e); }
+      }
+
+      function hideTocContextMenu() {
+        try {
+          const menu = $('toc-context-menu');
+          if (!menu) return;
+          menu.style.display = 'none';
+          menu.removeAttribute('data-for-node');
+        } catch (e) { /* ignore */ }
+      }
+
+      // Hide menu on global interactions
+      document.addEventListener('click', (e) => { hideTocContextMenu(); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideTocContextMenu(); });
+
+      // Find parent array and index for a node id, returns { parentArray, index }
+      function findParentArrayAndIndex(nodes, targetId) {
+        for (let i = 0; i < nodes.length; i++) {
+          const node = nodes[i];
+          if (node.id === targetId) return { parentArray: nodes, index: i };
+          if (node.children) {
+            const found = findParentArrayAndIndex(node.children, targetId);
+            if (found) return found;
+          }
+        }
+        return null;
+      }
+
+      // Insert a temporary input before/after node and handle Enter to commit
+      function insertNewNodeInline(targetNodeId, position = 'after') {
+        try {
+          const found = findParentArrayAndIndex(CURRENT_TOC, targetNodeId);
+          if (!found) {
+            // Maybe target is nested deeper; try scanning whole tree again
+          }
+          const parentArray = found ? found.parentArray : null;
+          const idx = found ? found.index : -1;
+          if (!parentArray || idx < 0) {
+            console.warn('Could not locate parent for node', targetNodeId);
+            return;
+          }
+
+          // Create a temporary placeholder node and render input in the DOM
+          const tempId = `__tmp__${Date.now()}`;
+          const tempNode = { id: tempId, title: '', children: [] };
+          const insertIndex = position === 'before' ? idx : idx + 1;
+          parentArray.splice(insertIndex, 0, tempNode);
+          renderLeftNavTree();
+
+          // Find the rendered element for temp node and replace title with input
+          const el = document.querySelector(`[data-node-id="${CSS.escape(tempId)}"] .left-nav-title`) || document.querySelector(`[data-node-id="${CSS.escape(tempId)}"]`);
+          let titleEl = el;
+          if (!titleEl) {
+            // Fallback: re-render and query again
+            renderLeftNavTree();
+            titleEl = document.querySelector(`[data-node-id="${CSS.escape(tempId)}"] .left-nav-title`) || document.querySelector(`[data-node-id="${CSS.escape(tempId)}"]`);
+          }
+          if (!titleEl) {
+            console.warn('Failed to find temp node element');
+            return;
+          }
+
+          // Replace content with input
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.placeholder = 'New chapter name';
+          input.style.width = '140px';
+          input.style.padding = '6px 8px';
+          input.style.borderRadius = '6px';
+          input.style.border = '1px solid var(--ring)';
+          // Clear displayed title and append input
+          titleEl.textContent = '';
+          titleEl.appendChild(input);
+          input.focus();
+
+          function cleanupTemp() {
+            // If temp still present (id starts with __tmp__) remove it
+            const pFound = findParentArrayAndIndex(CURRENT_TOC, tempId);
+            if (pFound) {
+              pFound.parentArray.splice(pFound.index, 1);
+            }
+            renderLeftNavTree();
+          }
+
+          input.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              const val = input.value.trim();
+              if (!val) { showToast('Name cannot be empty', 'error'); return; }
+              // Build new node
+              const newId = slug(val);
+              const newNode = { id: newId, title: val, children: [] };
+              // Replace temp node with real node
+              const p = findParentArrayAndIndex(CURRENT_TOC, tempId);
+              if (!p) { showToast('Failed to insert node', 'error'); cleanupTemp(); return; }
+              p.parentArray.splice(p.index, 1, newNode);
+
+              // Call /api/read as required
+              try {
+                const topic = $('inpTopic').value.trim();
+                const payload = {
+                  topic: val,
+                  node: { title: val, id: newId },
+                  path: [],
+                  level: parseInt($('inpDepth').value || '3', 10)
+                };
+                const resp = await fetch('/api/read', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                if (resp.ok) {
+                  const data = await resp.json();
+                  // Attach returned content if any
+                  if (data && data.content) CONTENT.set(newId, data.content);
+                  // Also seed EXP_CACHE if children returned
+                  if (data && Array.isArray(data.children)) {
+                    newNode.children = data.children;
+                    EXP_CACHE.set(newId, data.children);
+                  }
+                } else {
+                  console.warn('api/read failed for new node:', await resp.text());
+                }
+              } catch (e) { console.warn('Failed calling /api/read for new node', e); }
+
+              // Update persisted notebook state and re-render
+              syncCurrentNotebook();
+              autosave();
+              try { saveNotebook(); } catch (e) { console.warn('saveNotebook failed after insert', e); }
+              renderLeftNavTree();
+            } else if (e.key === 'Escape') {
+              cleanupTemp();
+            }
+          });
+
+          // If input loses focus without committing, remove temp
+          input.addEventListener('blur', () => { setTimeout(() => { const p = findParentArrayAndIndex(CURRENT_TOC, tempId); if (p) { p.parentArray.splice(p.index, 1); renderLeftNavTree(); } }, 150); });
+
+        } catch (e) { console.error('insertNewNodeInline failed', e); }
+      }
+
+      function deleteTocNode(nodeId) {
+        try {
+          if (!confirm('Delete this node and all its children? This cannot be undone.')) return;
+          // Find parent array and remove
+          const found = findParentArrayAndIndex(CURRENT_TOC, nodeId);
+          if (!found) { showToast('Node not found', 'error'); return; }
+          // Remove node
+          const removed = found.parentArray.splice(found.index, 1)[0];
+
+          // Clean content map and caches recursively
+          function removeRecursively(n) {
+            try {
+              CONTENT.delete(n.id);
+              EXP_CACHE.delete(n.id);
+              SUMMARIES.delete(n.id);
+              CHAT_HISTORY.delete(n.id);
+              EXPANDED.delete(n.id);
+              LEVELS_ENABLED.delete(n.id);
+              LEVEL_CONTENT.delete(n.id);
+              ACTIVE_LEVEL.delete(n.id);
+              LEVEL_READING.forEach(k => { if (k.startsWith(n.id + '@')) LEVEL_READING.delete(k); });
+              VIDEOS.delete(n.id);
+              VIZ_ELIG.delete(n.id);
+              HIGHLIGHTS.delete(n.id);
+              ANNOTATIONS.delete(n.id);
+              DEEP_MARKS.delete(n.id);
+              // Remove any deep dives that reference this node or its children
+              for (let i = DEEP_DIVES.length - 1; i >= 0; i--) {
+                const dd = DEEP_DIVES[i];
+                if (!dd) continue;
+                if (dd.nodeId === n.id || (dd.newChildIds || []).some(id => id === n.id)) {
+                  DEEP_DIVES.splice(i, 1);
+                }
+              }
+              if (n.children) n.children.forEach(c => removeRecursively(c));
+            } catch (e) { /* ignore */ }
+          }
+          removeRecursively(removed);
+
+          // If deleted node was selected, clear selection
+          if (SELECTED_NODE_ID === nodeId) SELECTED_NODE_ID = null;
+
+    syncCurrentNotebook();
+    renderLeftNavTree();
+    autosave();
+    try { saveNotebook(); } catch (e) { console.warn('saveNotebook failed after delete', e); }
+        } catch (e) { console.error('deleteTocNode failed', e); showToast('Delete failed: ' + (e.message || ''), 'error'); }
+      }
 
     // ----------------------- Selection & Deep Dive Functions -----------------------
     function getSelectionInfo() {
@@ -2820,6 +3079,14 @@ Requirements:
       const title = document.createElement('span');
       title.className = 'left-nav-title';
       title.textContent = node.title;
+      // Provide a stable element for attaching data-node-id and context menu handling
+      title.dataset.nodeId = node.id;
+      // Right-click handling: show custom context menu
+      title.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        showTocContextMenu(node.id, ev);
+      });
       nodeDiv.appendChild(title);
       
       
