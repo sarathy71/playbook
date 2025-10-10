@@ -3943,8 +3943,11 @@ Requirements:
           // server-side bookkeeping and prevents 400 errors complaining about
           // missing node.
           const nodeForRequest = includeContext ? { id: node.id, title: node.title } : { id: node.id, title: (selectionInfo.text || '').slice(0, 200) };
-          // Determine the level to request for this deep dive (respect levels UI if enabled)
+          // Determine the level to request for this deep dive payload (respect parent's levels UI if enabled)
           const ddLevel = LEVELS_ENABLED.has(node.id) ? (ACTIVE_LEVEL.get(node.id) || 'Beginner') : 'Beginner';
+          // For the overview read that seeds the new wrapper, always request Beginner content
+          // so the wrapper's Beginner level starts with a true Beginner explanation.
+          const ddOverviewLevel = 'Beginner';
 
           const payload = {
             topic: topicForRequest,
@@ -4045,7 +4048,9 @@ Requirements:
               const respRead = await fetch("/api/read", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ topic: topicForRequest, audience, model, temperature, node: includeContext ? { id: overviewId, title: wrapper.title } : { id: overviewId, title: wrapper.title }, path: includeContext ? pathForRequest : [], depth, sections, level: ddLevel })
+                // Request overview content at Beginner level so the wrapper's Beginner
+                // content isn't inadvertently populated with the parent's active level.
+                body: JSON.stringify({ topic: topicForRequest, audience, model, temperature, node: includeContext ? { id: overviewId, title: wrapper.title } : { id: overviewId, title: wrapper.title }, path: includeContext ? pathForRequest : [], depth, sections, level: ddOverviewLevel })
               });
               if (respRead.ok) {
                 const rdr = await respRead.json();
