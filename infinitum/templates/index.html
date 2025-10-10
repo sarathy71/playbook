@@ -149,6 +149,16 @@
       border-radius: 2px;
       padding: 0 2px;
     }
+    /* Temporary highlight for newly inserted nodes */
+    .temp-insert-highlight {
+      animation: tempInsertFlash 1.4s ease-in-out;
+      background: linear-gradient(90deg, rgba(255,249,196,0.9), rgba(255,255,255,0));
+    }
+    @keyframes tempInsertFlash {
+      0% { box-shadow: 0 0 0px rgba(59,130,246,0.35); }
+      20% { box-shadow: 0 0 8px rgba(59,130,246,0.35); }
+      100% { box-shadow: 0 0 0px rgba(59,130,246,0); }
+    }
     /* Context menu for highlight actions */
     .highlight-context-menu {
       position: fixed;
@@ -840,6 +850,7 @@
   <div id="toc-context-menu" role="menu" aria-hidden="true">
     <button id="ctxInsertBefore">Insert new chapter before</button>
     <button id="ctxInsertAfter">Insert new chapter after</button>
+    <button id="ctxInsertChild">Insert child topic</button>
     <button id="ctxDeleteNode" class="danger">Delete</button>
   </div>
 
@@ -1127,10 +1138,11 @@ Requirements:
   const QUICK_DIVE_CACHE = new Map(); // normalizedSelectionText -> { content, createdAt, deepMarkId }
     const DEEP_WITH_CONTEXT = new Set(); // nodeId -> whether deep-dive should include parent/context
     const UNDO_STACK = [];          // [{type, parentId, childrenIds, timestamp}]
-    const LEVELS_ENABLED = new Set(); // nodeId → whether Levels UI is enabled
-    const ACTIVE_LEVEL = new Map();   // nodeId → active level (1-10)
-    const LEVEL_CONTENT = new Map();  // nodeId → Map<level, content>
-    const LEVEL_READING = new Set();  // nodeId@level → in-flight read
+  // Levels now use four named depth levels: Beginner, Intermediate, Standard, Advanced
+  const LEVELS_ENABLED = new Set(); // nodeId → whether Levels UI is enabled
+  const ACTIVE_LEVEL = new Map();   // nodeId → active level (string label)
+  const LEVEL_CONTENT = new Map();  // nodeId → Map<levelLabel, content>
+  const LEVEL_READING = new Set();  // nodeId@levelLabel → in-flight read
   const SUMMARIES = new Map();       // nodeId → summary text
     const VISUALIZING = new Set();    // nodeId → in-flight visualization
     const VIZ_ELIG = new Map();        // nodeId → { ok: boolean, score: number, rationale: string }
@@ -1155,7 +1167,7 @@ Requirements:
     // Global notebook summary object for external integrations
     let CURRENT_NOTEBOOK = { toc: CURRENT_TOC, content: {} };
 
-    function syncCurrentNotebook() {
+  function syncCurrentNotebook() {
       try {
         CURRENT_NOTEBOOK.toc = CURRENT_TOC;
         // Convert CONTENT Map to plain object
@@ -1182,9 +1194,19 @@ Requirements:
         expansions[nodeId] = children;
       }
 
+      // Build content as a mapping nodeId -> { levelLabel: content }
       const content = {};
+      // First, copy LEVEL_CONTENT entries (already keyed by level label)
+      for (const [nodeId, levelMap] of LEVEL_CONTENT) {
+        content[nodeId] = {};
+        for (const [levelLabel, txt] of levelMap) {
+          content[nodeId][levelLabel] = txt;
+        }
+      }
+      // Then fallback to any single CONTENT entries by seeding them as Beginner
       for (const [nodeId, text] of CONTENT) {
-        content[nodeId] = text;
+        if (!content[nodeId]) content[nodeId] = {};
+        if (!content[nodeId]['Beginner']) content[nodeId]['Beginner'] = text;
       }
 
       const chat = {};
@@ -1207,6 +1229,7 @@ Requirements:
       for (const [nodeId, levelMap] of LEVEL_CONTENT) {
         levelContent[nodeId] = {};
         for (const [level, content] of levelMap) {
+          // level is a string label (e.g., 'Beginner')
           levelContent[nodeId][level] = content;
         }
       }
@@ -1269,9 +1292,9 @@ Requirements:
         deepDives: DEEP_DIVES,
   quickDiveCache: (function(){ const o = {}; for (const [k,v] of QUICK_DIVE_CACHE) o[k]=v; return o; })(),
   deepWithContext,
-        levelsEnabled,
-        activeLevel,
-        levelContent,
+  levelsEnabled,
+  activeLevel,
+  levelContent,
   summaries,
         vizElig,
         highlights,
@@ -1343,7 +1366,8 @@ Requirements:
         for (const [nodeId, levelMap] of Object.entries(notebook.levelContent)) {
           const map = new Map();
           for (const [level, content] of Object.entries(levelMap)) {
-            map.set(parseInt(level), content);
+            // level keys are labels (e.g., 'Beginner') — keep as strings
+            map.set(level, content);
           }
           LEVEL_CONTENT.set(nodeId, map);
         }
@@ -1407,7 +1431,10 @@ Requirements:
         for (const [nodeId, content] of Object.entries(notebook.content || {})) {
           if (content && !LEVEL_CONTENT.has(nodeId)) {
             LEVEL_CONTENT.set(nodeId, new Map());
-            LEVEL_CONTENT.get(nodeId).set(1, content);
+            // seed Beginner level label for legacy single-content notebooks
+            LEVEL_CONTENT.get(nodeId).set('Beginner', content);
+            ACTIVE_LEVEL.set(nodeId, 'Beginner');
+            LEVELS_ENABLED.add(nodeId);
           }
         }
       }
@@ -1420,10 +1447,28 @@ Requirements:
         }
       }
 
+      // Restore content: expect notebook.content to be a map nodeId -> { levelLabel: text }
       CONTENT.clear();
+      LEVEL_CONTENT.clear();
       if (notebook.content) {
-        for (const [nodeId, text] of Object.entries(notebook.content)) {
-          CONTENT.set(nodeId, text);
+        for (const [nodeId, levelObj] of Object.entries(notebook.content)) {
+          try {
+            if (levelObj && typeof levelObj === 'object') {
+              const map = new Map();
+              for (const [lvl, txt] of Object.entries(levelObj)) {
+                map.set(lvl, txt);
+              }
+              LEVEL_CONTENT.set(nodeId, map);
+              // Seed legacy CONTENT map with Beginner if present for UI paths expecting CONTENT
+              if (map.has('Beginner')) {
+                CONTENT.set(nodeId, map.get('Beginner'));
+              }
+            } else if (typeof levelObj === 'string') {
+              // Older format: single string per node — preserve as Beginner
+              LEVEL_CONTENT.set(nodeId, new Map([['Beginner', levelObj]]));
+              CONTENT.set(nodeId, levelObj);
+            }
+          } catch (e) { /* ignore malformed entries */ }
         }
       }
 
@@ -1562,7 +1607,12 @@ Requirements:
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, notebook })
         }).then(async (resp) => {
-          if (!resp.ok) throw new Error(await resp.text());
+          if (!resp.ok) {
+            const txt = await resp.text().catch(() => 'Server error');
+            console.warn('Deepdive API failed:', resp.status, txt);
+            showToast('Deep dive request failed: ' + resp.status + ' — ' + (txt || 'server error'), 'error', 5000);
+            return;
+          }
           const data = await resp.json();
           // remember last saved id/name locally for UX so next saves auto-overwrite
           LAST_SAVED_NOTEBOOK_ID = data.id;
@@ -2037,6 +2087,10 @@ Requirements:
           if (btnAfter) {
             btnAfter.onclick = (e) => { e.stopPropagation(); hideTocContextMenu(); insertNewNodeInline(nodeId, 'after'); };
           }
+          const btnChild = $('ctxInsertChild');
+          if (btnChild) {
+            btnChild.onclick = (e) => { e.stopPropagation(); hideTocContextMenu(); insertNewChildInline(nodeId); };
+          }
           if (btnDelete) {
             btnDelete.onclick = (e) => { e.stopPropagation(); hideTocContextMenu(); deleteTocNode(nodeId); };
           }
@@ -2135,7 +2189,19 @@ Requirements:
               const newNode = { id: newId, title: val, children: [] };
               // Replace temp node with real node
               const p = findParentArrayAndIndex(CURRENT_TOC, tempId);
-              if (!p) { showToast('Failed to insert node', 'error'); cleanupTemp(); return; }
+              if (!p) {
+                // Placeholder not found — it may have already been replaced elsewhere.
+                // Try to find a node with the new id and select it instead of showing a scary error.
+                const existing = findNodeById(CURRENT_TOC, newId);
+                if (existing) {
+                  renderLeftNavTree();
+                  try { selectNodeInLeftNav(existing.id); } catch (e) { /* ignore */ }
+                  return;
+                }
+                // Otherwise silently remove temp and abort insertion.
+                cleanupTemp();
+                return;
+              }
               p.parentArray.splice(p.index, 1, newNode);
 
               // Call /api/read as required
@@ -2145,7 +2211,7 @@ Requirements:
                   topic: val,
                   node: { title: val, id: newId },
                   path: [],
-                  level: parseInt($('inpDepth').value || '3', 10)
+                  level: 'Beginner'
                 };
                 const resp = await fetch('/api/read', {
                   method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
@@ -2160,7 +2226,9 @@ Requirements:
                     EXP_CACHE.set(newId, data.children);
                   }
                 } else {
-                  console.warn('api/read failed for new node:', await resp.text());
+                  const txt = await resp.text().catch(() => 'Server error');
+                  console.warn('api/read failed for new node:', txt);
+                  showToast('Content generation failed: ' + (txt || 'server error'), 'error');
                 }
               } catch (e) { console.warn('Failed calling /api/read for new node', e); }
 
@@ -2177,7 +2245,136 @@ Requirements:
           // If input loses focus without committing, remove temp
           input.addEventListener('blur', () => { setTimeout(() => { const p = findParentArrayAndIndex(CURRENT_TOC, tempId); if (p) { p.parentArray.splice(p.index, 1); renderLeftNavTree(); } }, 150); });
 
-        } catch (e) { console.error('insertNewNodeInline failed', e); }
+  } catch (e) { console.error('insertNewNodeInline failed', e); showToast('Insert failed: ' + (String(e) || ''), 'error'); }
+      }
+
+      // Insert a temporary inline input as a new child of the given parent node
+      function insertNewChildInline(parentNodeId) {
+        try {
+          // Find the parent node
+          const parentNode = findNodeById(CURRENT_TOC, parentNodeId);
+          if (!parentNode) { showToast('Parent node not found', 'error'); return; }
+
+          if (!parentNode.children) parentNode.children = [];
+          const tempId = `__tmp__${Date.now()}`;
+          const tempNode = { id: tempId, title: '', children: [] };
+          // Append as last child
+          parentNode.children.push(tempNode);
+          // Ensure parent expanded so child is visible
+          EXPANDED.add(parentNodeId);
+          renderLeftNavTree();
+
+          // Replace rendered title with input
+          const el = document.querySelector(`[data-node-id="${CSS.escape(tempId)}"] .left-nav-title`) || document.querySelector(`[data-node-id="${CSS.escape(tempId)}"]`);
+          let titleEl = el;
+          if (!titleEl) {
+            renderLeftNavTree();
+            titleEl = document.querySelector(`[data-node-id="${CSS.escape(tempId)}"] .left-nav-title`) || document.querySelector(`[data-node-id="${CSS.escape(tempId)}"]`);
+          }
+          if (!titleEl) { showToast('Failed to render input', 'error'); return; }
+
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.placeholder = 'New child topic name';
+          input.style.width = '140px';
+          input.style.padding = '6px 8px';
+          input.style.borderRadius = '6px';
+          input.style.border = '1px solid var(--ring)';
+          titleEl.textContent = '';
+          titleEl.appendChild(input);
+          input.focus();
+
+          function cleanupTemp() {
+            const pFound = findParentArrayAndIndex(CURRENT_TOC, tempId);
+            if (pFound) {
+              pFound.parentArray.splice(pFound.index, 1);
+            }
+            renderLeftNavTree();
+          }
+
+          input.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              const val = input.value.trim();
+              if (!val) { showToast('Name cannot be empty', 'error'); return; }
+              // Build new node id and node
+              let newId = slug(val);
+              // Ensure uniqueness by namespacing under parent if collision
+              if (findNodeById(CURRENT_TOC, newId)) {
+                newId = `${parentNodeId}/${newId}`;
+              }
+              const newNode = { id: newId, title: val, children: [] };
+
+              // Replace temp node with real node in parent's children
+              const pFound = findParentArrayAndIndex(CURRENT_TOC, tempId);
+              if (!pFound) {
+                // Placeholder not found — try to recover by looking for an existing node with the same id.
+                const existing = findNodeById(CURRENT_TOC, newId);
+                if (existing) {
+                  renderLeftNavTree();
+                  try { selectNodeInLeftNav(existing.id); } catch (e) { /* ignore */ }
+                  return;
+                }
+                cleanupTemp();
+                return;
+              }
+              pFound.parentArray.splice(pFound.index, 1, newNode);
+
+              // Call /api/read with parent context and current level
+              try {
+                const currentLevel = ACTIVE_LEVEL.get(parentNodeId) || 'Beginner';
+                const payload = {
+                  topic: val,
+                  node: { id: newId, title: val },
+                  path: getNodePath(parentNodeId),
+                  level: currentLevel
+                };
+                const resp = await fetch('/api/read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (resp.ok) {
+                  const data = await resp.json();
+                  if (data && data.content) {
+                    // Store content under LEVEL_CONTENT for the new node at current level
+                    if (!LEVEL_CONTENT.has(newId)) LEVEL_CONTENT.set(newId, new Map());
+                    LEVEL_CONTENT.get(newId).set(currentLevel, data.content);
+                    // Also seed CONTENT for compatibility
+                    CONTENT.set(newId, data.content);
+                  }
+                  if (data && Array.isArray(data.children)) {
+                    newNode.children = data.children;
+                    EXP_CACHE.set(newId, data.children);
+                  }
+                } else {
+                  const txt = await resp.text().catch(() => 'Server error');
+                  console.warn('api/read failed for new child:', txt);
+                  showToast('Content generation failed: ' + (txt || 'server error'), 'error');
+                }
+              } catch (err) { console.warn('Failed to call /api/read for child', err); }
+
+              // Persist and re-render
+              syncCurrentNotebook();
+              autosave();
+              try { saveNotebook(); } catch (e) { console.warn('saveNotebook failed after child insert', e); }
+              renderLeftNavTree();
+
+              // Select and briefly highlight the new node
+              try {
+                selectNodeInLeftNav(newId);
+                const elNode = document.querySelector(`[data-node-id="${CSS.escape(newId)}"]`);
+                if (elNode) {
+                  elNode.classList.add('temp-insert-highlight');
+                  setTimeout(() => elNode.classList.remove('temp-insert-highlight'), 1600);
+                  elNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+              } catch (e) { /* ignore highlight failures */ }
+
+            } else if (e.key === 'Escape') {
+              cleanupTemp();
+            }
+          });
+
+          input.addEventListener('blur', () => { setTimeout(() => { const p = findParentArrayAndIndex(CURRENT_TOC, tempId); if (p) { p.parentArray.splice(p.index, 1); renderLeftNavTree(); } }, 150); });
+
+  } catch (e) { console.error('insertNewChildInline failed', e); showToast('Insert child failed: ' + (String(e) || ''), 'error'); }
       }
 
       function deleteTocNode(nodeId) {
@@ -3206,16 +3403,16 @@ Requirements:
         const tabsContainer = document.createElement('div');
         tabsContainer.className = 'levels-tabs';
         console.log(`Creating tabs container for nodeId: ${nodeId}`);
-        for (let level = 1; level <= 10; level++) {
+        for (const label of LEVEL_LABELS) {
           const tab = document.createElement('button');
           tab.className = 'level-tab';
-          if (level === activeLevel) tab.classList.add('active');
-          if (LEVEL_READING.has(`${nodeId}@${level}`)) tab.classList.add('loading');
-          tab.textContent = getLevelLabel(level);
-          tab.title = getLevelDescription(level);
+          if (label === activeLevel) tab.classList.add('active');
+          if (LEVEL_READING.has(`${nodeId}@${label}`)) tab.classList.add('loading');
+          tab.textContent = label;
+          tab.title = getLevelDescription(label);
           tab.addEventListener('click', (ev) => {
             ev.stopPropagation();
-            switchLevel(nodeId, level);
+            switchLevel(nodeId, label);
           });
           tabsContainer.appendChild(tab);
         }
@@ -3514,8 +3711,8 @@ Requirements:
           console.log('Turning OFF levels');
           LEVELS_ENABLED.delete(nodeId);
 
-          // Restore Beginner (Level 1) content to main CONTENT
-          const level1Content = LEVEL_CONTENT.get(nodeId)?.get(1) || "";
+          // Restore Beginner content to main CONTENT
+          const level1Content = LEVEL_CONTENT.get(nodeId)?.get('Beginner') || "";
           CONTENT.set(nodeId, level1Content);
 
           // Clear active level
@@ -3533,10 +3730,10 @@ Requirements:
 
           // Seed Level 1 (Beginner) with existing content
           const existingContent = CONTENT.get(nodeId) || "Click 'Read' to load a Beginner explanation";
-          LEVEL_CONTENT.get(nodeId).set(1, existingContent);
+          LEVEL_CONTENT.get(nodeId).set('Beginner', existingContent);
 
           // Set active level to 1 (Beginner)
-          ACTIVE_LEVEL.set(nodeId, 1);
+          ACTIVE_LEVEL.set(nodeId, 'Beginner');
 
           // Clear main content to avoid duplication
           CONTENT.delete(nodeId);
@@ -3560,9 +3757,12 @@ Requirements:
       }
     }
 
-    function switchLevel(nodeId, level) {
+  // Level labels (now include Researcher as the highest depth)
+  const LEVEL_LABELS = ['Beginner','Intermediate','Standard','Advanced','Researcher'];
+
+    function switchLevel(nodeId, levelLabel) {
       try {
-        ACTIVE_LEVEL.set(nodeId, level);
+        ACTIVE_LEVEL.set(nodeId, levelLabel);
         // Immediately re-render so the selected tab is highlighted
         if (NAV_MODE === 'leftnav') {
           renderLeftNavTree();
@@ -3574,8 +3774,8 @@ Requirements:
         }
 
         // If content not cached, mark as loading and fetch it so the content area shows Loading... immediately
-        if (!LEVEL_CONTENT.get(nodeId)?.has(level)) {
-          const readingKey = `${nodeId}@${level}`;
+        if (!LEVEL_CONTENT.get(nodeId)?.has(levelLabel)) {
+          const readingKey = `${nodeId}@${levelLabel}`;
           LEVEL_READING.add(readingKey);
           // Re-render to show loading state
           if (NAV_MODE === 'leftnav') {
@@ -3587,15 +3787,15 @@ Requirements:
             renderSelectedNodeContent(nodeId);
           }
           // Start the async fetch (fetchLevelContent will clear LEVEL_READING when done)
-          fetchLevelContent(nodeId, level);
+          fetchLevelContent(nodeId, levelLabel);
         }
       } catch (error) {
         console.error("Error switching level:", error);
       }
     }
 
-    async function fetchLevelContent(nodeId, level) {
-  const readingKey = `${nodeId}@${level}`;
+    async function fetchLevelContent(nodeId, levelLabel) {
+  const readingKey = `${nodeId}@${levelLabel}`;
   // If the key is already present it may have been pre-marked by switchLevel to show loading state.
   // Ensure the key exists so UI shows a loading state, but do not early-return — proceed with the fetch.
   if (!LEVEL_READING.has(readingKey)) LEVEL_READING.add(readingKey);
@@ -3622,7 +3822,7 @@ Requirements:
           body: JSON.stringify({ 
             topic, audience, model, temperature, learningMode, 
             node: { id: node.id, title: node.title }, 
-            path, level 
+            path, level: levelLabel 
           })
         });
         
@@ -3633,7 +3833,7 @@ Requirements:
         if (!LEVEL_CONTENT.has(nodeId)) {
           LEVEL_CONTENT.set(nodeId, new Map());
         }
-        LEVEL_CONTENT.get(nodeId).set(level, data.content || "No content returned.");
+        LEVEL_CONTENT.get(nodeId).set(levelLabel, data.content || "No content returned.");
 
         // Immediately re-render so selected pane shows the new content without extra clicks
         if (SELECTED_NODE_ID === nodeId) {
@@ -3662,34 +3862,20 @@ Requirements:
 
     function getLevelDescription(level) {
       const descriptions = {
-        1: "Beginner - Simple analogies and examples",
-        2: "Basic - Core concepts with examples", 
-        3: "Introductory - Key ideas and intuition",
-        4: "Intermediate - Balanced explanation",
-        5: "Standard - Comprehensive overview",
-        6: "Advanced - Detailed with some math",
-        7: "Expert - Rigorous with derivations",
-        8: "Specialist - Formal treatment",
-        9: "Research - Cutting-edge concepts",
-        10: "Expert-level - Maximum formalism"
+        'Beginner': "Explain the topic in intuitive, conceptual terms. Focus on what it is and why it matters using clear examples, analogies, or short stories. Avoid technical jargon, formulas, or symbolic notation. Prioritize simple, relatable language that builds intuition and curiosity.",
+        'Intermediate': "Begin by briefly recalling the key beginner intuitions (e.g., 'Remember that ...'), then introduce the main components or mechanisms. Explain each component's role before formal terminology; introduce formulas or notation only after intuition is clear. Define each term as it appears and provide a simple concrete example showing how components interact.",
+        'Standard': "Start with a concise recap of the intermediate understanding and the problem addressed. Present formal structure clearly (definitions, core equations, algorithms, or frameworks). After each formal element, explain its meaning in plain language and show application via an example or use case. Aim for textbook clarity.",
+        'Advanced': "Situate the topic in its broader theoretical or professional context. Present detailed relationships, derivations, or mechanisms; after each technical section interpret conceptual meaning, significance, and connections to earlier levels. Include at least one in-depth applied scenario.",
+        'Researcher': "Extend advanced depth with frontier perspectives, alternative formulations, and open questions. After complex reasoning, interpret each part conceptually, discuss assumptions/limitations, contrast approaches, and connect insights back to intuition and practical relevance."
       };
       return descriptions[level] || `Level ${level}`;
     }
 
     function getLevelLabel(level) {
-      const labels = {
-        1: "Beginner",
-        2: "Learner", 
-        3: "Student",
-        4: "Intermediate",
-        5: "Standard",
-        6: "Advanced",
-        7: "Expert",
-        8: "Specialist",
-        9: "Researcher",
-        10: "Master"
-      };
-      return labels[level] || `Level ${level}`;
+      // Accept either a label or numeric; if numeric, map to closest label
+      if (typeof level === 'string') return level;
+      const numericToLabel = {1:'Beginner',2:'Intermediate',3:'Standard',4:'Advanced',5:'Researcher'};
+      return numericToLabel[level] || `Level ${level}`;
     }
 
     function diveDeep() {
@@ -3757,6 +3943,9 @@ Requirements:
           // server-side bookkeeping and prevents 400 errors complaining about
           // missing node.
           const nodeForRequest = includeContext ? { id: node.id, title: node.title } : { id: node.id, title: (selectionInfo.text || '').slice(0, 200) };
+          // Determine the level to request for this deep dive (respect levels UI if enabled)
+          const ddLevel = LEVELS_ENABLED.has(node.id) ? (ACTIVE_LEVEL.get(node.id) || 'Beginner') : 'Beginner';
+
           const payload = {
             topic: topicForRequest,
             audience,
@@ -3765,6 +3954,7 @@ Requirements:
             node: nodeForRequest,
             path: pathForRequest,
             with_context: includeContext,
+            level: ddLevel,
             selection: {
               text: selectionInfo.text,
               sourceNodeId: nodeId,
@@ -3848,14 +4038,14 @@ Requirements:
 
             const overviewId = wrapper.id;
             let readOverviewContent = '';
-            try {
+              try {
               const depth = parseInt($("inpDepth").value || "3", 10);
               const sections = parseInt($("inpSections").value || "5", 10);
               // Request read content using context only when includeContext is true
               const respRead = await fetch("/api/read", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ topic: topicForRequest, audience, model, temperature, node: includeContext ? { id: overviewId, title: wrapper.title } : { id: overviewId, title: wrapper.title }, path: includeContext ? pathForRequest : [], depth, sections, level: 5 })
+                body: JSON.stringify({ topic: topicForRequest, audience, model, temperature, node: includeContext ? { id: overviewId, title: wrapper.title } : { id: overviewId, title: wrapper.title }, path: includeContext ? pathForRequest : [], depth, sections, level: ddLevel })
               });
               if (respRead.ok) {
                 const rdr = await respRead.json();
@@ -3891,8 +4081,8 @@ Requirements:
               // Enable levels UI and set active level to Beginner (1)
               LEVELS_ENABLED.add(overviewId);
               if (!LEVEL_CONTENT.has(overviewId)) LEVEL_CONTENT.set(overviewId, new Map());
-              LEVEL_CONTENT.get(overviewId).set(1, normalized);
-              ACTIVE_LEVEL.set(overviewId, 1);
+              LEVEL_CONTENT.get(overviewId).set('Beginner', normalized);
+              ACTIVE_LEVEL.set(overviewId, 'Beginner');
               // Ensure single-content map does not also hold the same content
               CONTENT.delete(overviewId);
 
@@ -3919,7 +4109,7 @@ Requirements:
             const prev = currentSelection;
             try { currentSelection = selectionInfo; createDeepMarkFromSelection(wrapper.id); } finally { currentSelection = prev; }
             try { applyDeepMarksForNode(node.id); } catch (e) {}
-          } catch (e) { console.warn('Failed to create deep mark:', e); }
+          } catch (e) { console.warn('Failed to create deep mark:', e); showToast('Failed to create deep mark: ' + (String(e) || ''), 'error'); }
 
           // Re-render UI (do not block user)
           if (NAV_MODE === 'leftnav') {
@@ -4403,15 +4593,15 @@ Requirements:
         const tabsContainer = document.createElement("div");
         tabsContainer.className = "levels-tabs";
         
-        // Create tabs for levels 1-10
-        for (let level = 1; level <= 10; level++) {
+        // Create tabs for the explicit level labels
+        for (const label of LEVEL_LABELS) {
           const tab = document.createElement("button");
           tab.className = "level-tab";
-          if (level === activeLevel) tab.classList.add("active");
-          if (LEVEL_READING.has(`${node.id}@${level}`)) tab.classList.add("loading");
-          tab.textContent = getLevelLabel(level);
-          tab.title = getLevelDescription(level); // Add tooltip with full description
-          tab.onclick = () => switchLevel(node.id, level);
+          if (label === activeLevel) tab.classList.add("active");
+          if (LEVEL_READING.has(`${node.id}@${label}`)) tab.classList.add("loading");
+          tab.textContent = label;
+          tab.title = getLevelDescription(label); // Add tooltip with full description
+          tab.onclick = () => switchLevel(node.id, label);
           tabsContainer.appendChild(tab);
         }
         wrap.appendChild(tabsContainer);
@@ -4591,7 +4781,7 @@ Requirements:
           }
 
           // Include level information in chat request
-          const level = LEVELS_ENABLED.has(node.id) ? (ACTIVE_LEVEL.get(node.id) || 1) : null;
+          const level = LEVELS_ENABLED.has(node.id) ? (ACTIVE_LEVEL.get(node.id) || 'Beginner') : null;
           
           const resp = await fetch("/api/chat", {
               method: "POST",
@@ -4924,7 +5114,7 @@ Requirements:
           if (!LEVEL_CONTENT.has(node.id)) {
             LEVEL_CONTENT.set(node.id, new Map());
           }
-          LEVEL_CONTENT.get(node.id).set(1, mock);
+          LEVEL_CONTENT.get(node.id).set('Beginner', mock);
         } else {
         CONTENT.set(node.id, mock);
         }
@@ -5068,11 +5258,11 @@ Requirements:
           for (const n of (nodes || [])) {
             try {
               LEVELS_ENABLED.add(n.id);
-              ACTIVE_LEVEL.set(n.id, 1);
+              ACTIVE_LEVEL.set(n.id, 'Beginner');
               if (!LEVEL_CONTENT.has(n.id)) LEVEL_CONTENT.set(n.id, new Map());
               // If we already have main CONTENT for this node, seed level 1 with it
-              if (CONTENT.has(n.id) && !LEVEL_CONTENT.get(n.id).has(1)) {
-                LEVEL_CONTENT.get(n.id).set(1, CONTENT.get(n.id));
+              if (CONTENT.has(n.id) && !LEVEL_CONTENT.get(n.id).has('Beginner')) {
+                LEVEL_CONTENT.get(n.id).set('Beginner', CONTENT.get(n.id));
                 CONTENT.delete(n.id);
               }
               if (n.children && n.children.length) enableLevelsForAll(n.children);

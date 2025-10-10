@@ -154,6 +154,41 @@ HYPER_SYSTEM_PROMPT = (
     "Encourage reflection through teach-back and micro-exercises where appropriate."
 )
 
+# LEVEL DEFINITIONS block required by UI: inserted verbatim into READ/DEEPDIVE prompts
+LEVEL_DEFINITIONS = (
+    "LEVEL DEFINITIONS (Depth, Contextual Recall, and Explanation Rules):\n\n"
+    "- Beginner:\n"
+    "  Explain the topic in intuitive, conceptual terms.\n"
+    "  Focus on *what* it is and *why* it matters using clear examples, analogies, or short stories.\n"
+    "  Avoid technical jargon, formulas, or symbolic notation.\n"
+    "  Prioritize simple, relatable language that builds intuition and curiosity.\n\n"
+    "- Intermediate:\n"
+    "  Begin by briefly recalling the key ideas or intuitions a beginner would have just learned (\"Remember that ...\").\n"
+    "  Then extend that understanding by introducing the main components or mechanisms that make the concept work — processes, steps, rules, or variables.\n"
+    "  * Explain each component’s role before using formal terminology.\n"
+    "  * If the topic involves formulas, algorithms, or technical notation, introduce them gradually only after intuition is clear.\n"
+    "  * Define every term, variable, or element as it appears, and describe how it connects to the earlier intuition.\n"
+    "  * Provide a simple, concrete example or scenario showing how these components interact in practice.\n\n"
+    "- Standard:\n"
+    "  Begin with a concise recap of the intermediate understanding — what problem the concept or method addresses.\n"
+    "  Present the formal structure clearly and systematically: for scientific/mathematical topics include definitions, core equations, or algorithms; for conceptual or applied topics provide frameworks, principles, or step-by-step methods.\n"
+    "  After introducing each formal or structural element: explain its meaning or purpose in plain language and show how it applies through an example, use case, or thought experiment.\n\n"
+    "- Advanced:\n"
+    "  Situate the topic within its broader theoretical, technical, or professional context.\n"
+    "  Present detailed relationships, derivations, or intricate mechanisms as appropriate to the field. After each dense or technical section, pause to interpret: what does this mean conceptually? why is it significant? how does it connect to earlier levels?\n"
+    "  Provide at least one applied or real-world scenario illustrating the principle in depth.\n\n"
+    "- Researcher:\n"
+    "  Extend the advanced explanation with theoretical, experimental, or design-level depth.\n"
+    "  Include frontier perspectives, alternative formulations, and open questions. After presenting complex reasoning or models: interpret what each part represents conceptually, discuss assumptions, limitations, or contrasting approaches, and connect abstract insights back to intuition or practical relevance.\n\n"
+    "Whenever formal, symbolic, or technical content is introduced (e.g., equations, algorithms, rules, models, code, or data relationships):\n"
+    "  (a) Explain the conceptual motivation first.\n"
+    "  (b) Define each component or symbol clearly.\n"
+    "  (c) Follow with an intuitive or real-world example that demonstrates how it works.\n"
+    "  (d) Always link back to the underlying \"why\" before moving on.\n\n"
+    "The level requested is: {level}\n\n"
+    "Ensure generated content strictly reflects the requested level while following the overall pedagogical flow.\n"
+)
+
 
 def _slug(s: str) -> str:
     import re
@@ -672,7 +707,7 @@ You are NOT writing full content — just encoding this *structure and pedagogic
             # Build a lightweight read prompt similar to /api/read (defaults to Beginner / level 1)
             level = 1
             level_descriptions = {
-                1: "Explain for a beginner: simple analogies, everyday examples, avoid jargon."
+                1: "Beginner: intuitive conceptual explanation with simple examples and analogies; avoid jargon or formulas."
             }
             level_instruction = level_descriptions.get(level, "")
 
@@ -730,7 +765,7 @@ def api_foundations():
     first = node or {}
 
     level = 1
-    level_instruction = "Explain for a beginner: simple analogies, everyday examples, avoid jargon."
+    level_instruction = "Beginner: intuitive conceptual explanation with simple examples and analogies; avoid jargon or formulas."
     standard_user_prompt_read = f"""
 Write an exhaustive, structured "Foundations" guide that lists the *necessary prerequisite topics* a learner must master to thoroughly understand the selected outline item. Produce the output in Markdown (headings, short paragraphs, and bullet lists) suitable as a study checklist and teaching scaffold.
 
@@ -846,33 +881,63 @@ def api_read():
     sections = int(body.get("sections", 5))
     model = body.get("model", "gpt-4.1-mini")
     temperature = float(body.get("temperature", 0.3))
-    level = int(body.get("level", 1))  # Default to level 1 (Beginner) if not specified
+    raw_level = body.get("level", 'Beginner')  # can be string label or legacy numeric
+    # Map incoming level to one of the four labels
+    def _normalize_level_label(l):
+        try:
+            if isinstance(l, str):
+                s = l.strip().lower()
+                if s in ('beginner', 'b'):
+                    return 'Beginner'
+                if s in ('intermediate', 'intermediate-level'):
+                    return 'Intermediate'
+                if s in ('standard', 'std'):
+                    return 'Standard'
+                if s in ('advanced', 'adv'):
+                    return 'Advanced'
+                if s in ('researcher', 'research'):
+                    return 'Researcher'
+                # try titlecase fallback
+                return l.strip().title()
+            else:
+                # numeric mapping for backward compatibility
+                li = int(l)
+                if li <= 2:
+                    return 'Beginner'
+                if li <= 4:
+                    return 'Intermediate'
+                if li <= 6:
+                    return 'Standard'
+                if li <= 8:
+                    return 'Advanced'
+                return 'Researcher'
+        except Exception:
+            return 'Beginner'
+
+    level_label = _normalize_level_label(raw_level)
     if not topic or not node:
         abort(400, "Missing topic or node.")
-
-    # Level-aware prompting
-    level_descriptions = {
-        1: "Explain as if to a curious child or complete newcomer: use simple analogies, everyday examples, avoid jargon, no complex formulas unless absolutely necessary.",
-        2: "Explain for someone with basic knowledge: use simple concepts and examples, minimal technical terms, focus on understanding over precision.",
-        3: "Explain for an introductory learner: use key concepts and intuition, some examples, basic terminology, avoid advanced mathematics.",
-        4: "Explain for an intermediate learner: balanced explanation with some technical details, examples and intuition, moderate use of terminology.",
-        5: "Explain for an informed learner: comprehensive overview with good balance of intuition and technical details, standard terminology.",
-        6: "Explain for an advanced learner: detailed explanation with mathematical concepts, technical terminology, some derivations.",
-        7: "Explain for an expert: rigorous treatment with derivations, formal definitions, advanced mathematics, technical precision.",
-        8: "Explain for a specialist: formal treatment with proofs, advanced formalism, specialized terminology, research-level concepts.",
-        9: "Explain for a researcher: cutting-edge concepts, advanced formalism, open problems, research-level depth.",
-        10: "Explain at maximum expertise level: complete formalism, rigorous proofs, advanced mathematics, research-level precision."
+    # Level-specific instruction (short form) used for backward compatibility in prompts
+    level_instruction_map = {
+        'Beginner': 'Explain conceptually and intuitively; focus on what and why using clear examples and analogies. No equations or formal derivations.',
+        'Intermediate': 'Introduce main symbols, notations, and simple equations gradually; for each equation explain terms, intuition, and provide a simple numeric example.',
+        'Standard': 'Provide textbook-style explanations with precise definitions and key equations; explain intuition and define all terms; include example problems.',
+        'Advanced': 'Deliver detailed technical explanations with derivations and comprehensive relationships; decompose math conceptually and explain variable dependencies with examples.',
+        'Researcher': 'Extend advanced depth with critical analysis, alternate formulations, annotated derivations, assumption discussion, and relevant experimental or research context.'
     }
-    
-    level_instruction = level_descriptions.get(level, level_descriptions[1])
+    level_instruction = level_instruction_map.get(level_label, level_instruction_map['Beginner'])
 
     # Replace the per-case prompts with a single exhaustive-study prompt for read requests.
+    # Prepend LEVEL DEFINITIONS block to clearly instruct model about depth/formalism
+    level_block = LEVEL_DEFINITIONS.format(level=level_label)
+
     standard_user_prompt = f"""
+{level_block}
 Write an exhaustive, in-depth study of the selected outline item. Treat it as a comprehensive mini-chapter that explores the topic from all relevant angles — theory, context, methodology, examples, and implications. The goal is to provide a complete understanding suitable for independent study or teaching material.
 
 Global Topic: {topic}
 Audience: {audience}
-Proficiency Level: {level}/10 - {level_instruction}
+Requested Depth Level: {level_label} - {level_instruction}
 Depth preference (context): {depth}
 Approx sections per level (context): {sections}
 
@@ -1053,6 +1118,39 @@ def api_deepdive():
     if len(selection_text) > 3000:
         abort(400, "Selection too long. Please select less than 3000 characters.")
 
+    # Normalize level label from request (supports string labels or legacy numeric)
+    raw_level = body.get('level', 'Beginner')
+    def _normalize_level_label(l):
+        try:
+            if isinstance(l, str):
+                s = l.strip().lower()
+                if s in ('beginner', 'b'):
+                    return 'Beginner'
+                if s in ('intermediate', 'intermediate-level'):
+                    return 'Intermediate'
+                if s in ('standard', 'std'):
+                    return 'Standard'
+                if s in ('advanced', 'adv'):
+                    return 'Advanced'
+                if s in ('researcher', 'research'):
+                    return 'Researcher'
+                return l.strip().title()
+            else:
+                li = int(l)
+                if li <= 2:
+                    return 'Beginner'
+                if li <= 4:
+                    return 'Intermediate'
+                if li <= 6:
+                    return 'Standard'
+                if li <= 8:
+                    return 'Advanced'
+                return 'Researcher'
+        except Exception:
+            return 'Beginner'
+
+    level_label = _normalize_level_label(raw_level)
+
     if not with_context:
         # Neutral/standalone prompt: do not mention global topic or breadcrumb
         system_prompt = (
@@ -1061,41 +1159,7 @@ def api_deepdive():
             "Given a short text selection, produce 1-3 child sections that explain and deepen understanding of that selection. Do NOT reference the parent topic, breadcrumb, or surrounding context."
         )
 
-        user_prompt = f"""
-You are creating a focused deep dive structure based solely on the provided text selection.
-
-Selected Text to Deep Dive Into:
-"{selection_text}"
-
-Instructions:
-- Generate a shortName (3-6 words, noun-phrase) that captures the essence of the selection
-- Create children array where:
-  - children[0] is "Overview" with rich readContent (200-300 words, Markdown + LaTeX) explaining the selection
-  - children[1..] are 2-3 relevant subtopics with concise titles and 1-2 line descriptions (no readContent)
-- Focus tightly on the selected passage; do NOT include or rely on parent/topic-level context
-- Use clear, educational titles (not sentences)
-- Keep IDs URL-safe
-
-Return ONLY valid JSON:
-{{ 
-  "shortName": string,
-  "wrapperDescription": string (optional),
-  "children": TocNode[] 
-}}
-
-TocNode = {{ 
-  id?: string (optional), 
-  title: string, 
-  description?: string, 
-  readContent?: string (Markdown with LaTeX)
-}}
-
-Style guidelines:
-- shortName should be a concise noun-phrase (e.g., "Activation Functions")
-- Overview readContent should be comprehensive (200-300 words) with Markdown and LaTeX
-- For math expressions, use $...$ for inline math or $$...$$ for display math
-- Do not surround TeX with normal parentheses or brackets, and do not put math inside code fences
-""".strip()
+        # inside the if/else below we'll prepend the LEVEL DEFINITIONS block and build user_prompt
 
     else:
         # Context-aware prompt: include topic and breadcrumb
@@ -1107,7 +1171,11 @@ Style guidelines:
             "and practical application."
         )
 
-        user_prompt = f"""
+    # Prepend level block for context-aware deep dives as well
+    level_block = LEVEL_DEFINITIONS.format(level=level_label)
+
+    user_prompt = f"""
+{level_block}
 You are creating a focused deep dive structure based on a specific text selection from a parent topic.
 
 Global Topic: {topic}
